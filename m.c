@@ -32,6 +32,8 @@
 #define MTNAME "HTTPPARSERMT"
 
 
+static int live_http_parsers = 0;
+
 typedef struct {
 	lua_State *L;
 	int pkey;	// env ref to parser userdata
@@ -56,6 +58,10 @@ typedef struct {
 					    //       cleared in message_begin cb
 } LPARSERDATA;
 
+int lhttpparser__count(lua_State* L) {
+    lua_pushinteger(L, live_http_parsers);
+    return 1;
+}
 
 int lhttpparser_message_begin_cb(http_parser *P){
 	LPARSERDATA *data = P->data;
@@ -291,17 +297,19 @@ static int lhttpparser_index(lua_State *L){
 }
 
 static int lhttpparser_gc(lua_State *L){
-	LPARSERDATA *data = luaL_checkudata(L, 1, MTNAME);
-	if( data->field != NULL ){
-		free(data->field);
-	}
-	if( data->value != NULL ){
-		free(data->value);
-	}
-	luaL_unref(L, LUA_ENVIRONINDEX, data->dakey);
-	luaL_unref(L, LUA_ENVIRONINDEX, data->pkey);
-	luaL_unref(L, LUA_ENVIRONINDEX, data->udkey);
-	return 0;
+    live_http_parsers--;
+
+    LPARSERDATA *data = luaL_checkudata(L, 1, MTNAME);
+    if( data->field != NULL ){
+        free(data->field);
+    }
+    if( data->value != NULL ){
+        free(data->value);
+    }
+    luaL_unref(L, LUA_ENVIRONINDEX, data->dakey);
+    luaL_unref(L, LUA_ENVIRONINDEX, data->pkey);
+    luaL_unref(L, LUA_ENVIRONINDEX, data->udkey);
+    return 0;
 }
 
 static int lhttpparser_new(lua_State *L, int ptype){
@@ -336,6 +344,8 @@ static int lhttpparser_new(lua_State *L, int ptype){
 
 	luaL_getmetatable(L, MTNAME);
 	lua_setmetatable(L, -2);
+        live_http_parsers++;
+
 	return 1;
 }
 
@@ -348,8 +358,9 @@ static int lhttpparser_response(lua_State *L){
 }
 
 static luaL_reg funcs[] = {{"request", lhttpparser_request},
-									{"response", lhttpparser_response},
-									{NULL, NULL}};
+                           {"response", lhttpparser_response},
+                           {"__count", lhttpparser__count},
+                           {NULL, NULL}};
 
 static luaL_reg meths[] = {{"__index", lhttpparser_index},
 									{"__gc", lhttpparser_gc},

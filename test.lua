@@ -1,4 +1,4 @@
-
+#!/usr/bin/env lua
 require 'httpparser'
 
 requests = {}
@@ -32,6 +32,7 @@ requests.firefox = {
 	"Connection:keep-alive\r\n\r\n"
 }
 
+print("count=" .. httpparser.__count())
 
 for name, data in pairs(requests) do
 	local request = httpparser.request()
@@ -58,5 +59,9 @@ for name, data in pairs(requests) do
 
 end
 
-print( )
+collectgarbage("collect")
+collectgarbage("collect")
+
+print("count=" .. httpparser.__count())
+
 
