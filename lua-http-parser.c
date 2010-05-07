@@ -20,6 +20,20 @@ static void push_registry(lua_State* L) {
     assert(lua_istable(L, -1) /* luaopen_http_parser() should create this */);
 }
 
+static int lhp_objcount(lua_State *L) {
+    int count = 0;
+
+    push_registry(L);
+
+    lua_pushnil(L);
+    while ( lua_next(L, -2) != 0 ) {
+        count++;
+        lua_pop(L, 1);
+    }
+    lua_pushinteger(L, count);
+    return 1;
+}
+
 static lua_State* push_parser(http_parser* parser) {
     assert(parser != NULL);
     assert(parser->data != NULL);
@@ -30,6 +44,7 @@ static lua_State* push_parser(http_parser* parser) {
     push_registry(L);
     lua_pushlightuserdata(L, parser);
     lua_rawget(L, -2);
+    assert(lua_isuserdata(L, -1));
     lua_remove(L, -2);
 }
 
@@ -116,9 +131,18 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
     http_parser* parser = (http_parser*)lua_newuserdata(L, sizeof(http_parser));
     assert(parser);
 
+    /* Use the passed in table as the fenv: */
     lua_pushvalue(L, 1);
     lua_setfenv(L, -2);
 
+    /* Register the userdata: */
+    push_registry(L);
+    lua_pushlightuserdata(L, parser);
+    lua_pushvalue(L, -3);
+    lua_rawset(L, -3);
+    lua_pop(L, 1);
+
+    /* Get the metatable: */
     luaL_getmetatable(L, PARSER_MT);
     assert(!lua_isnil(L, -1)/* PARSER_MT found? */);
 
@@ -203,6 +227,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushcfunction(L, lhp_response);
     lua_setfield(L, -2, "response");
+
+    lua_pushcfunction(L, lhp_objcount);
+    lua_setfield(L, -2, "__objcount");
 
     return 1;
 }

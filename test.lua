@@ -3,8 +3,9 @@ local lhp = require 'http.parser'
 
 requests = {}
 
+-- NOTE: All requests must be version HTTP/1.1:
 requests.ab = {
-	"GET / HTTP/1.0\r\n",
+	"GET / HTTP/1.1\r\n",
 	"Host: localhost:8000\r\n",
 	"User-Agent: ApacheBench/2.3\r\n",
 	"Accept: */*\r\n\r\n"
@@ -32,7 +33,7 @@ requests.firefox = {
 	"Connection:keep-alive\r\n\r\n"
 }
 
---print("count=" .. httpparser.__count())
+print("count=" .. lhp.__objcount())
 
 local function init_parser()
    local reqs         = {}
@@ -44,7 +45,6 @@ local function init_parser()
    function cb:on_message_begin()
       assert(cur == nil)
       cur = { headers = {} }
-      self.requests = reqs
    end
 
    local fields = { "path", "query_string", "url", "fragment", "body" }
@@ -99,10 +99,10 @@ local function init_parser()
       cur = nil
    end
 
-   return lhp.request(cb)
+   return lhp.request(cb), reqs
 end
 
-local parser = init_parser()
+local parser, reqs = init_parser()
 
 for name, data in pairs(requests) do
    for _, line in ipairs(data) do
@@ -111,11 +111,12 @@ for name, data in pairs(requests) do
       assert(not upgrade)
    end
 
-   print(parser.reqs[-1].url)
+   print(table.concat(reqs[#reqs].headers['User-Agent']))
 end
+parser = nil
 
 collectgarbage("collect")
 
---print("count=" .. httpparser.__count())
+print("count=" .. lhp.__objcount())
 
 
