@@ -12,77 +12,51 @@
     ((i) > 0 || (i) <= LUA_REGISTRYINDEX ? \
      (i) : lua_gettop(L) + (i) + 1)
 
-static char* obj_registry = "http.parser{obj}";
-
-static void push_registry(lua_State* L) {
-    lua_pushlightuserdata(L, &obj_registry);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    assert(lua_istable(L, -1) /* luaopen_http_parser() should create this */);
-}
-
-static int lhp_objcount(lua_State *L) {
-    int count = 0;
-
-    push_registry(L);
-
-    lua_pushnil(L);
-    while ( lua_next(L, -2) != 0 ) {
-        count++;
-        lua_pop(L, 1);
-    }
-    lua_pushinteger(L, count);
-    return 1;
-}
-
-static lua_State* push_parser(http_parser* parser) {
-    assert(parser != NULL);
-    assert(parser->data != NULL);
-    lua_State* L = (lua_State*)parser->data;
-
-    lua_checkstack(L, 10);
-
-    push_registry(L);
-    lua_pushlightuserdata(L, parser);
-    lua_rawget(L, -2);
-    assert(lua_isuserdata(L, -1));
-    lua_remove(L, -2);
-}
+/* The index which contains the userdata fenv */
+#define FENV_IDX 3
 
 static int lhp_http_cb(http_parser* parser, const char* name) {
-    int result = 0;
-    lua_State* L = push_parser(parser);
+    lua_State* L;
+    assert(NULL != parser);
+    L = (lua_State*)parser->data;
+    assert(NULL != L);
+    assert(lua_checkstack(L, 2));
 
-    lua_getfenv(L, -1);
-    lua_getfield(L, -1, name);
+    lua_getfield(L, FENV_IDX, name);
     if ( lua_isfunction(L, -1) ) {
-        lua_pushvalue(L, -3);
-        lua_call(L, 1, 1);
-        if ( lua_isnumber(L, -1) ) result = lua_tointeger(L, -1);
-        lua_pop(L, 2);
+        lua_pushboolean(L, 0);
     } else {
-        lua_pop(L, 3);
+        lua_pop(L, 1);
     }
 
-    return result;
+    return 0;
 }
 
 static int lhp_http_data_cb(http_parser* parser, const char* name, const char* str, size_t len) {
-    int result = 0;
-    lua_State* L = push_parser(parser);
+    lua_State* L;
+    assert(NULL != parser);
+    L = (lua_State*)parser->data;
+    assert(NULL != L);
+    assert(lua_checkstack(L, 2));
 
-    lua_getfenv(L, -1);
-    lua_getfield(L, -1, name);
+    lua_getfield(L, FENV_IDX, name);
     if ( lua_isfunction(L, -1) ) {
-        lua_pushvalue(L, -3);
-        lua_pushlstring(L, str, len);
-        lua_call(L, 2, 1);
-        if ( lua_isnumber(L, -1) ) result = lua_tointeger(L, -1);
-        lua_pop(L, 2);
+        if ( lua_rawequal(L, -3, -1) ) {
+            /* Re-use this event */
+            lua_pop(L, 1);
+            assert(lua_istable(L, -1));
+            lua_pushlstring(L, str, len);
+            lua_rawseti(L, -2, lua_objlen(L, -2) + 1);
+        } else {
+            lua_createtable(L, 1, 0);
+            lua_pushlstring(L, str, len);
+            lua_rawseti(L, -2, 1);
+        }
     } else {
-        lua_pop(L, 3);
+        lua_pop(L, 1);
     }
 
-    return result;
+    return 0;
 }
 
 static int lhp_message_begin_cb(http_parser* parser) {
@@ -129,18 +103,22 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
     luaL_checktype(L, 1, LUA_TTABLE);
 
     http_parser* parser = (http_parser*)lua_newuserdata(L, sizeof(http_parser));
-    assert(parser);
+    assert(NULL != parser);
 
-    /* Use the passed in table as the fenv: */
-    lua_pushvalue(L, 1);
+    /* Copy functions to new fenv table */
+    lua_newtable(L);
+    lua_pushnil(L);
+    while ( lua_next(L, 1) != 0 ) {
+        if ( lua_isstring(L, -2) && lua_isfunction(L, -1) ) {
+            lua_pushvalue(L, -2);
+            lua_insert(L, -2);
+            /* <fenv>, <key>, <key>, <value> */
+            lua_rawset(L, -4);
+        } else {
+            lua_pop(L, 1);
+        }
+    }
     lua_setfenv(L, -2);
-
-    /* Register the userdata: */
-    push_registry(L);
-    lua_pushlightuserdata(L, parser);
-    lua_pushvalue(L, -3);
-    lua_rawset(L, -3);
-    lua_pop(L, 1);
 
     /* Get the metatable: */
     luaL_getmetatable(L, PARSER_MT);
@@ -164,6 +142,7 @@ static int lhp_response(lua_State* L) {
 static int lhp_execute(lua_State* L) {
     http_parser* parser = check_parser(L, 1);
     size_t       len;
+    size_t       result;
     const char*  str = luaL_checklstring(L, 2, &len);
 
     static http_parser_settings settings = {
@@ -179,17 +158,86 @@ static int lhp_execute(lua_State* L) {
         .on_message_complete = lhp_message_complete_cb
     };
 
-    size_t result = http_parser_execute(parser, settings, str, len);
+    lua_settop(L, 2);
+    lua_getfenv(L, 1);
 
+    lua_rawgeti(L, FENV_IDX, 1);
+    if ( lua_isfunction(L, -1) ) {
+        lua_rawgeti(L, FENV_IDX, 2);
+    } else {
+        lua_pop(L, 1);
+    }
+
+    parser->data = L;
+    result = http_parser_execute(parser, settings, str, len);
+
+    if ( lua_istable(L, -1) && 0 != len ) {
+        /* Save this event for the next time execute is ran */
+        lua_rawseti(L, FENV_IDX, 2);
+        lua_rawseti(L, FENV_IDX, 1);
+    } else {
+        lua_pushnil(L);
+        lua_rawseti(L, FENV_IDX, 1);
+    }
+
+    /* Transform the stack into a table: */
+    len = lua_gettop(L) - FENV_IDX;
+    lua_createtable(L, len, 0);
+    lua_insert(L, FENV_IDX);
+    for (; len > 0; --len ) {
+        lua_rawseti(L, FENV_IDX, len);
+    }
+    lua_pop(L, 1);
     lua_pushnumber(L, result);
 
-    return 1;
+    return 2;
 }
 
 static int lhp_should_keep_alive(lua_State* L) {
     http_parser* parser = check_parser(L, 1);
     lua_pushboolean(L, http_should_keep_alive(parser));
     return 1;
+}
+
+/* The execute method has a "lua based stub" so that callbacks
+ * can yield without having to apply the CoCo patch to Lua. */
+static const char* lhp_execute_lua =
+    "return function(...)\n"
+    "  local callbacks, result = execute(...)\n"
+    "  for i = 1, #callbacks, 2 do\n"
+    "    if callbacks[i+1] then\n"
+    "      callbacks[i](concat(callbacks[i+1]))\n"
+    "    else\n"
+    "      callbacks[i]()\n"
+    "    end\n"
+    "  end\n"
+    "  return result\n"
+    "end";
+static void lhp_push_execute_fn(lua_State* L) {
+    int top = lua_gettop(L);
+    int ok  = luaL_loadstring(L, lhp_execute_lua);
+    assert(0 == ok);
+
+    /* Create environment table: */
+    lua_createtable(L, 0, 3);
+
+    lua_pushcfunction(L, lhp_execute);
+    lua_setfield(L, -2, "execute");
+
+    lua_getfield(L, LUA_GLOBALSINDEX, "require");
+    lua_pushliteral(L, "table");
+    lua_call(L, 1, 1);
+    lua_getfield(L, -1, "concat");
+    lua_setfield(L, -3, "concat");
+    lua_pop(L, 1);
+
+    ok = lua_setfenv(L, -2);
+    assert(ok);
+    lua_call(L, 0, 1);
+
+    /* Compiled lua function should be at the top of the stack now. */
+    assert(lua_gettop(L) == top + 1);
+    assert(lua_isfunction(L, -1));
 }
 
 LUALIB_API int luaopen_http_parser(lua_State* L) {
@@ -202,22 +250,10 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_pushcfunction(L, lhp_should_keep_alive);
     lua_setfield(L, -2, "should_keep_alive");
 
-    lua_pushcfunction(L, lhp_execute);
+    lhp_push_execute_fn(L);
     lua_setfield(L, -2, "execute");
 
     lua_pop(L, 1);
-
-    /* "object registry" init */
-    lua_pushlightuserdata(L, &obj_registry);
-    lua_newtable(L);
-
-    lua_pushstring(L, "v");
-    lua_setfield(L, -2, "__mode");
-
-    lua_pushvalue(L, -1);
-    lua_setmetatable(L, -2);
-
-    lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* export http.parser */
     lua_newtable(L);
@@ -227,9 +263,6 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushcfunction(L, lhp_response);
     lua_setfield(L, -2, "response");
-
-    lua_pushcfunction(L, lhp_objcount);
-    lua_setfield(L, -2, "__objcount");
 
     return 1;
 }
