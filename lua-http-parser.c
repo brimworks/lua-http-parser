@@ -171,7 +171,7 @@ static int lhp_execute(lua_State* L) {
     parser->data = L;
     result = http_parser_execute(parser, settings, str, len);
 
-    if ( lua_istable(L, -1) && 0 != len ) {
+    if ( lua_istable(L, -1) && 0 != len && lua_gettop(L) > FENV_IDX ) {
         /* Save this event for the next time execute is ran */
         lua_rawseti(L, FENV_IDX, 2);
         lua_rawseti(L, FENV_IDX, 1);
@@ -196,6 +196,42 @@ static int lhp_execute(lua_State* L) {
 static int lhp_should_keep_alive(lua_State* L) {
     http_parser* parser = check_parser(L, 1);
     lua_pushboolean(L, http_should_keep_alive(parser));
+    return 1;
+}
+
+static int lhp_is_upgrade(lua_State* L) {
+    http_parser* parser = check_parser(L, 1);
+    lua_pushboolean(L, parser->upgrade);
+    return 1;
+}
+
+static int lhp_method(lua_State* L) {
+    http_parser* parser = check_parser(L, 1);
+    switch(parser->method) {
+    case HTTP_DELETE:    lua_pushliteral(L, "DELETE"); break;
+    case HTTP_GET:       lua_pushliteral(L, "GET"); break;
+    case HTTP_HEAD:      lua_pushliteral(L, "HEAD"); break;
+    case HTTP_POST:      lua_pushliteral(L, "POST"); break;
+    case HTTP_PUT:       lua_pushliteral(L, "PUT"); break;
+    case HTTP_CONNECT:   lua_pushliteral(L, "CONNECT"); break;
+    case HTTP_OPTIONS:   lua_pushliteral(L, "OPTIONS"); break;
+    case HTTP_TRACE:     lua_pushliteral(L, "TRACE"); break;
+    case HTTP_COPY:      lua_pushliteral(L, "COPY"); break;
+    case HTTP_LOCK:      lua_pushliteral(L, "LOCK"); break;
+    case HTTP_MKCOL:     lua_pushliteral(L, "MKCOL"); break;
+    case HTTP_MOVE:      lua_pushliteral(L, "MOVE"); break;
+    case HTTP_PROPFIND:  lua_pushliteral(L, "PROPFIND"); break;
+    case HTTP_PROPPATCH: lua_pushliteral(L, "PROPPATCH"); break;
+    case HTTP_UNLOCK:    lua_pushliteral(L, "UNLOCK"); break;
+    default:
+        lua_pushnumber(L, parser->method);
+    }
+    return 1;
+}
+
+static int lhp_status_code(lua_State* L) {
+    http_parser* parser = check_parser(L, 1);
+    lua_pushnumber(L, parser->status_code);
     return 1;
 }
 
@@ -246,6 +282,15 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushvalue(L, -1);
     lua_setfield(L, -2, "__index");
+
+    lua_pushcfunction(L, lhp_is_upgrade);
+    lua_setfield(L, -2, "is_upgrade");
+
+    lua_pushcfunction(L, lhp_method);
+    lua_setfield(L, -2, "method");
+
+    lua_pushcfunction(L, lhp_status_code);
+    lua_setfield(L, -2, "status_code");
 
     lua_pushcfunction(L, lhp_should_keep_alive);
     lua_setfield(L, -2, "should_keep_alive");

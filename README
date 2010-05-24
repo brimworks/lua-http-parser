@@ -1,0 +1,119 @@
+**********************************************************************
+* Author  : Brian Maher <maherb at brimworks dot com>
+* Library : lua-http-parser - Lua 5.1 interface to ry's http-parser
+*
+* The MIT License
+*
+* Copyright (c) 2009-1010 Brian Maher
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+* THE SOFTWARE.
+**********************************************************************
+
+To use this library, you need ry's http-parser, get it here:
+    git clone git://github.com/ry/http-parser.git
+
+To build this library, you need luarocks, get it here:
+    http://www.luarocks.org/en/Download
+
+    Then build it like this:
+
+    luarocks make CFLAGS=-g
+
+Loading the library:
+
+    If you built the library as a loadable package
+        [local] lhp = require 'http.parser'
+
+    If you compiled the package statically into your application, call
+    the function "luaopen_http_parser(L)". It will create a table with the
+    http parser functions and leave it on the top of the stack.
+
+To test the library run:
+
+    ./test.lua
+
+    ...assuming that the `lua` on your PATH properly uses the luarocks
+    installed module.
+
+API:
+
+    parser = lhp.request {
+        on_url          = function(url)  ... end
+        on_path         = function(path) ... end
+        on_query_string = function(qstr) ... end
+        on_fragment     = function(frag) ... end
+        on_header_field = function(hkey) ... end
+        on_header_value = function(hval) ... end
+        on_body         = function(body) ... end
+
+        on_message_begin    = function() ... end
+        on_message_complete = function() ... end
+        on_headers_complete = function() ... end
+    }
+    parser = lhp.response { ... }
+
+        Create a new HTTP parser to handle either an HTTP request or
+        HTTP response respectively.  Pass in a table of callbacks that
+        are ran when the parser encounters the various fields.  By
+        default all callbacks will be ran with the full value for the
+        respective field [but please see BUGS below].  At some point
+        in the future, the on_body handler should *not* be buffered by
+        default (but at the moment, the entire body has to be read
+        before the on_body handler can execute).
+
+    bytes_read = parser:execute(input_bytes)
+
+        Feed the parser some partial input.  Returns how many bytes
+        where read.  A short read may happen if a request is being
+        "upgraded" or was an invalid format.  See parser:is_upgrade()
+        below to differentiate between these two events (if you want
+        to support an upgraded protocol).
+
+    parser:should_keep_alive()
+
+        Returns true if this TCP connection should be "kept alive"
+        so that it can be re-used for a future request/response.
+        If this returns false and you are the server, then respond
+        with the "Connection: close" header.  If you are the client,
+        then simply close the connection.
+
+    parser:is_upgrade()
+
+        Returns true if the input request wants to "upgrade" to a
+        different protocol.
+
+    parser:method()
+
+        Returns the name of the request method.  This is only valid
+        on HTTP requests.
+
+    parser:status_code()
+
+        Returns the HTTP status code of a response.  This is only valid
+        on HTTP responses.
+
+== BUGS ==
+
+ * If you register an on_url _and_ an (on_path, on_query_string or
+   on_fragment) handler, then the events will not be properly
+   buffered into a single event.
+
+ * The on_body callback should not be buffered by default.
+
+ * There is no way to disable buffering of events.
