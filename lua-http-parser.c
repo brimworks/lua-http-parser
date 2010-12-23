@@ -169,7 +169,7 @@ static int lhp_execute(lua_State* L) {
     }
 
     parser->data = L;
-    result = http_parser_execute(parser, settings, str, len);
+    result = http_parser_execute(parser, &settings, str, len);
 
     if ( lua_istable(L, -1) && 0 != len && lua_gettop(L) > FENV_IDX ) {
         /* Save this event for the next time execute is ran */
