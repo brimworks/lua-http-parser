@@ -27,6 +27,6 @@ include_directories(
 add_library(parser MODULE lua-http-parser.c http-parser/http_parser.c)
 set_target_properties(parser PROPERTIES COMPILE_FLAGS "${COMMON_CFLAGS}")
 install(TARGETS parser
-				LIBRARY DESTINATION ${INSTALL_LIBDIR}
+				LIBRARY DESTINATION ${INSTALL_LIBDIR}/http
 				)
 
