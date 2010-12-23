@@ -15,11 +15,6 @@ dependencies = {
 	'lua >= 5.1'
 }
 build	= {
-	type		= 'builtin',
-	modules	= {
-		["http.parser"]	= {
-			sources = { 'lua-http-parser.c', 'http-parser/http_parser.c' },
-			incdirs = { 'http-parser' }
-		}
-	}
+	type		= 'cmake',
+	variables = { INSTALL_LIBDIR = "$(LIBDIR)" },
 }
