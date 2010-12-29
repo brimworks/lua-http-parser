@@ -17,6 +17,7 @@ requests.ab = {
 }
 
 expects.ab = {
+   url = "/foo/t.html?qstring#frag",
    path = "/foo/t.html",
    query_string = "qstring",
    fragment = "frag",
@@ -35,6 +36,12 @@ requests.httperf = {
 }
 
 expects.httperf = {
+   url = "/",
+   path = "/",
+   headers = {
+      Host = "localhost",
+      ["User-Agent"] = "httperf/0.9.0",
+   },
 }
 
 requests.firefox = {
@@ -54,8 +61,16 @@ requests.firefox = {
 }
 
 expects.firefox = {
+   url = "/",
+   path = "/",
    headers = {
       ["User-Agent"] = "Mozilla/5.0 (X11; U;Linux i686; en-US; rv:1.9.0.15)Gecko/2009102815 Ubuntu/9.04 (jaunty)Firefox/3.0.15",
+      Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      ["Accept-Language"] = "en-gb,en;q=0.5",
+      ["Accept-Encoding"] = "gzip,deflate",
+      ["Accept-Charset"] = "ISO-8859-1,utf-8;q=0.7,*;q=0.7",
+      ["Keep-Alive"] = "300",
+      Connection = "keep-alive",
    }
 }
 
@@ -73,7 +88,7 @@ local function init_parser()
    -- TODO: If you set a url handler and (path or query_string or
    -- fragment) handler, then the url event will not be properly
    -- buffered.
-   local fields = { "path", "query_string", "fragment", "body" }
+   local fields = { "url", "path", "query_string", "fragment" }
    for _, field in ipairs(fields) do
       cb["on_" .. field] =
          function(value)
@@ -92,6 +107,17 @@ local function init_parser()
       assert(cur.headers[header_field] == nil)
       cur.headers[header_field] = value
       header_field = nil
+   end
+
+   function cb.on_headers_complete(value)
+      assert(header_field == nil)
+   end
+
+   function cb.on_body(value)
+      -- the on_body event is not buffered.
+      if value == nil then return end
+      local cur_body = cur.body or ''
+      cur.body = cur_body .. value
    end
 
    function cb.on_message_complete()

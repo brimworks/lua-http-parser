@@ -60,6 +60,7 @@ API:
         on_fragment     = function(frag) ... end
         on_header_field = function(hkey) ... end
         on_header_value = function(hval) ... end
+        -- the on_body event is not buffered, a nil value signals the end of the body.
         on_body         = function(body) ... end
 
         on_message_begin    = function() ... end
@@ -109,11 +110,5 @@ API:
         on HTTP responses.
 
 == BUGS ==
-
- * If you register an on_url _and_ an (on_path, on_query_string or
-   on_fragment) handler, then the events will not be properly
-   buffered into a single event.
-
- * The on_body callback should not be buffered by default.
 
  * There is no way to disable buffering of events.
