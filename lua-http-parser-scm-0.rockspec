@@ -3,7 +3,7 @@
 package	= 'lua-http-parser'
 version	= 'scm-0'
 source	= {
-	url	= 'git://github.com/Neopallium/lua-http-parser.git'
+	url	= 'git://github.com/brimworks/lua-http-parser.git'
 }
 description	= {
 	summary	= "A Lua binding to Ryan Dahl's http request/response parser.",
