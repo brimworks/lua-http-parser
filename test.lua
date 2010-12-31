@@ -92,10 +92,7 @@ local function init_parser()
       cur = { headers = {} }
    end
 
-   -- TODO: If you set a url handler and (path or query_string or
-   -- fragment) handler, then the url event will not be properly
-   -- buffered.
-   local fields = { "path", "query_string", "fragment" }
+   local fields = { "path", "query_string", "fragment", "on_url" }
    for _, field in ipairs(fields) do
       cb["on_" .. field] =
          function(value)
