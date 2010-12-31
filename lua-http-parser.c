@@ -377,14 +377,18 @@ static void lhp_push_execute_fn(lua_State* L) {
  * until a 'nil' is received, then it calls the callback with the buffered data. */
 static const char* lhp_make_event_buffer_lua =
     "local event_cb = ...\n"
-    "local buffer = ''\n"
+    "local concat = table.concat\n"
+    "local buffer = {}\n"
+    "local count = 0\n"
     "return function(chunk)\n"
     "  if chunk == nil then\n"
-    "    chunk = buffer\n"
-    "    buffer = ''\n"
+    "    chunk = concat(buffer)\n"
+    "    for i=1,count do buffer[i] = nil end\n"
+    "    count = 0\n"
     "    return event_cb(chunk)\n"
     "  end\n"
-    "  buffer = buffer .. chunk\n"
+		"  count = count + 1\n"
+    "  buffer[count] = chunk\n"
     "end";
 static void lhp_push_make_event_buffer_fn(lua_State* L) {
     int top = lua_gettop(L);
