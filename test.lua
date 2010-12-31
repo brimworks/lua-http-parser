@@ -1,4 +1,12 @@
 #!/usr/bin/env lua
+
+-- Make it easier to test
+local src_dir, build_dir = ...
+if ( src_dir ) then
+    package.path  = src_dir .. "?.lua;" .. package.path
+    package.cpath = build_dir .. "?.so;" .. package.cpath
+end
+
 local lhp = require 'http.parser'
 
 local expects = {}
@@ -25,7 +33,21 @@ expects.ab = {
       ["User-Agent"] = "ApacheBench/2.3",
       Accept = "*/*",
    },
-   body = "body\n"
+   body = { "body\n" }
+}
+
+requests.no_buff_body = {
+    "GET / HTTP/1.1\r\n",
+    "Host: foo:80\r\n",
+    "Content-Length: 12\r\n",
+    "\r\n",
+    "chunk1", "chunk2",
+}
+
+expects.no_buff_body = {
+    body = {
+        "chunk1", "chunk2"
+    }
 }
 
 requests.httperf = {
@@ -73,13 +95,20 @@ local function init_parser()
    -- TODO: If you set a url handler and (path or query_string or
    -- fragment) handler, then the url event will not be properly
    -- buffered.
-   local fields = { "path", "query_string", "fragment", "body" }
+   local fields = { "path", "query_string", "fragment" }
    for _, field in ipairs(fields) do
       cb["on_" .. field] =
          function(value)
             assert(cur[field] == nil, "["..tostring(field).."]=["..tostring(cur[field]).."] .. [" .. tostring(value) .. "]")
             cur[field] = value;
          end
+   end
+
+   function cb.on_body(value)
+       if ( nil == cur.body ) then
+           cur.body = {}
+       end
+       table.insert(cur.body, value)
    end
 
    function cb.on_header_field(value)
@@ -120,7 +149,7 @@ end
 for name, data in pairs(requests) do
    for _, line in ipairs(data) do
       local bytes_read = parser:execute(line)
-      assert(bytes_read == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+      assert(bytes_read == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."] in ".. name)
    end
 
    local got    = reqs[#reqs]

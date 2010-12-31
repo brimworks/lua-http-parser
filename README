@@ -72,10 +72,8 @@ API:
         HTTP response respectively.  Pass in a table of callbacks that
         are ran when the parser encounters the various fields.  By
         default all callbacks will be ran with the full value for the
-        respective field [but please see BUGS below].  At some point
-        in the future, the on_body handler should *not* be buffered by
-        default (but at the moment, the entire body has to be read
-        before the on_body handler can execute).
+        respective field [but please see BUGS below].  The on_body
+        handler does *not* buffer the value.
 
     bytes_read = parser:execute(input_bytes)
 
@@ -113,7 +111,3 @@ API:
  * If you register an on_url _and_ an (on_path, on_query_string or
    on_fragment) handler, then the events will not be properly
    buffered into a single event.
-
- * The on_body callback should not be buffered by default.
-
- * There is no way to disable buffering of events.

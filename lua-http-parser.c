@@ -32,7 +32,7 @@ static int lhp_http_cb(http_parser* parser, const char* name) {
     return 0;
 }
 
-static int lhp_http_data_cb(http_parser* parser, const char* name, const char* str, size_t len) {
+static int lhp_http_data_cb(http_parser* parser, const char* name, const char* str, size_t len, int is_buffered) {
     lua_State* L;
     assert(NULL != parser);
     L = (lua_State*)parser->data;
@@ -41,7 +41,7 @@ static int lhp_http_data_cb(http_parser* parser, const char* name, const char* s
 
     lua_getfield(L, FENV_IDX, name);
     if ( lua_isfunction(L, -1) ) {
-        if ( lua_rawequal(L, -3, -1) ) {
+        if ( is_buffered && lua_rawequal(L, -3, -1) ) {
             /* Re-use this event */
             lua_pop(L, 1);
             assert(lua_istable(L, -1));
@@ -64,27 +64,27 @@ static int lhp_message_begin_cb(http_parser* parser) {
 }
 
 static int lhp_path_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_path", str, len);
+    return lhp_http_data_cb(parser, "on_path", str, len, 1);
 }
 
 static int lhp_query_string_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_query_string", str, len);
+    return lhp_http_data_cb(parser, "on_query_string", str, len, 1);
 }
 
 static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_url", str, len);
+    return lhp_http_data_cb(parser, "on_url", str, len, 1);
 }
 
 static int lhp_fragment_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_fragment", str, len);
+    return lhp_http_data_cb(parser, "on_fragment", str, len, 1);
 }
 
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_header_field", str, len);
+    return lhp_http_data_cb(parser, "on_header_field", str, len, 1);
 }
 
 static int lhp_header_value_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_header_value", str, len);
+    return lhp_http_data_cb(parser, "on_header_value", str, len, 1);
 }
 
 static int lhp_headers_complete_cb(http_parser* parser) {
@@ -92,7 +92,7 @@ static int lhp_headers_complete_cb(http_parser* parser) {
 }
 
 static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_body", str, len);
+    return lhp_http_data_cb(parser, "on_body", str, len, 0);
 }
 
 static int lhp_message_complete_cb(http_parser* parser) {

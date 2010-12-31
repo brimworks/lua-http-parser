@@ -4,30 +4,39 @@ project(lua-http-parser C)
 
 set(BUILD_SHARED_LIBS TRUE)
 
-include(FindPkgConfig)
-
-#
-# Find system libraries
-#
-set(COMMON_CFLAGS "${CFLAGS}")
+set(INSTALL_CMOD share/lua/cmod CACHE PATH "Directory to install Lua binary modules (configure lua via LUA_CPATH)")
 
 ## Lua 5.1.x
-pkg_search_module(LUA REQUIRED lua lua5.1 lua-5.1)
-set(COMMON_CFLAGS "${COMMON_CFLAGS} ${LUA_CFLAGS}")
+include(FindLua51)
+if(!${LUA51_FOUND})
+    message(FATAL_ERROR "The FindLua51 module could not find lua :-(")
+endif()
+
 
 ## setup git submodules
-execute_process(COMMAND git submodule init)
-execute_process(COMMAND git submodule update)
+execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMAND git submodule init)
+execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMAND git submodule update)
 
-include_directories(
-				${CMAKE_CURRENT_SOURCE_DIR}
-				${CMAKE_CURRENT_SOURCE_DIR}/http-parser
-				)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/http-parser
+                    ${LUA_INCLUDE_DIR})
+
 add_library(parser MODULE lua-http-parser.c http-parser/http_parser.c)
-set_target_properties(parser PROPERTIES
-				COMPILE_FLAGS "${COMMON_CFLAGS}"
-				PREFIX "")
-install(TARGETS parser
-				LIBRARY DESTINATION ${INSTALL_LIBDIR}/http
-				)
+set_target_properties(parser PROPERTIES PREFIX "")
+set_target_properties(parser PROPERTIES OUTPUT_NAME parser)
 
+target_link_libraries(parser ${LUA_LIBRARIES})
+
+install(TARGETS parser
+        DESTINATION "${INSTALL_CMOD}/http")
+
+
+## Setup test stuff
+include(CTest)
+add_test(test ${LUA} ${CMAKE_CURRENT_SOURCE_DIR}/test.lua ${CMAKE_CURRENT_SOURCE_DIR}/ ${CMAKE_CURRENT_BINARY_DIR}/)
+set_tests_properties(test
+                     PROPERTIES
+                     FAIL_REGULAR_EXPRESSION
+                     "not ok")
