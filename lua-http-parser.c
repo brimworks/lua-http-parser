@@ -9,7 +9,7 @@
     ((http_parser*)luaL_checkudata((L), (narg), PARSER_MT))
 
 /* The index which contains the userdata fenv */
-#define FENV_IDX 4
+#define FENV_IDX 3
 
 /* These are indices into the fenv table. */
 #define CB_FLAGS_IDX             1
@@ -83,7 +83,7 @@ static int lhp_http_end_cb(http_parser* parser, int cb_id) {
     CB_FLAG_UNSET_HAS_DATA(lhp->flags, cb_id);
     /* push event callback function. */
     lua_rawgeti(L, FENV_IDX, cb_id);
-    lua_pushboolean(L, 0);
+    lua_pushnil(L);
     return 0;
 }
 
@@ -100,7 +100,7 @@ static int lhp_http_cb(http_parser* parser, int cb_id) {
     /* push event callback function. */
     lua_rawgeti(L, FENV_IDX, cb_id);
     if ( lua_isfunction(L, -1) ) {
-        lua_pushboolean(L, 0);
+        lua_pushnil(L);
     } else {
         lua_pop(L, 1); /* pop non-function value. */
     }
@@ -241,7 +241,7 @@ static int lhp_response(lua_State* L) {
 static int lhp_execute(lua_State* L) {
     lhp_State    lhp;
     http_parser* parser = check_parser(L, 1);
-    size_t       len,count;
+    size_t       len;
     size_t       result;
     const char*  str = luaL_checklstring(L, 2, &len);
     luaL_Buffer  buf;
@@ -262,10 +262,10 @@ static int lhp_execute(lua_State* L) {
 
     /* truncate stack to (userdata, string) */
     lua_settop(L, 2);
-    /* push place-holder value for callbacks table.  Stack: (userdata, string, nil) */
-    lua_pushnil(L);
-    /* get fenv from userdata.  Stack: (userdata, string, nil, fenv) */
+    /* get fenv from userdata.  Stack: (userdata, string, fenv) */
     lua_getfenv(L, 1);
+    /* push place-holder value for 'results'.  Stack: (userdata, string, fenv, nil) */
+    lua_pushnil(L);
 
     lhp.L = L;
     lhp.flags = 0;
@@ -291,20 +291,12 @@ static int lhp_execute(lua_State* L) {
         lua_rawseti(L, FENV_IDX, CB_FLAGS_IDX);
     }
 
+    /* replace nil place-holder with 'result' code. */
+    lua_pushnumber(L, result);
+    lua_replace(L, FENV_IDX+1);
     /* Transform the stack into a table: */
     len = lua_gettop(L) - FENV_IDX;
-    count = len;
-    if (len > 0) {
-        lua_createtable(L, len, 0);
-        lua_replace(L, FENV_IDX-1);
-        for (; len > 0; --len ) {
-            lua_rawseti(L, FENV_IDX-1, len);
-        }
-    }
-    lua_pop(L, 1); /* pop fenv. */
-    lua_pushnumber(L, count);
-    lua_pushnumber(L, result);
-    return 3;
+    return len;
 }
 
 static int lhp_should_keep_alive(lua_State* L) {
@@ -353,12 +345,18 @@ static int lhp_status_code(lua_State* L) {
  * can yield without having to apply the CoCo patch to Lua. */
 static const char* lhp_execute_lua =
     "local execute = ...\n"
-    "return function(...)\n"
-    "  local callbacks, len, result = execute(...)\n"
-    "  for i = 1, len, 2 do\n"
-    "    callbacks[i](callbacks[i+1] or nil)\n"
+    "local function execute_lua(result, event_cb, chunk, ...)\n"
+    "  if event_cb then\n"
+         /* call current event callback. */
+    "    event_cb(chunk)\n"
+         /* handle next event from stack. */
+    "    return execute_lua(result, ...)\n"
     "  end\n"
+       /* done no more events on stack. */
     "  return result\n"
+    "end\n"
+    "return function(...)\n"
+    "  return execute_lua(execute(...))\n"
     "end";
 static void lhp_push_execute_fn(lua_State* L) {
     int top = lua_gettop(L);
@@ -387,7 +385,7 @@ static const char* lhp_make_event_buffer_lua =
     "    count = 0\n"
     "    return event_cb(chunk)\n"
     "  end\n"
-		"  count = count + 1\n"
+    "  count = count + 1\n"
     "  buffer[count] = chunk\n"
     "end";
 static void lhp_push_make_event_buffer_fn(lua_State* L) {
