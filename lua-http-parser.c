@@ -14,21 +14,77 @@
 
 /* The indices into the Lua stack for various pieces of information */
 #define ST_FENV_IDX        3
-#define ST_IS_BUFFERED_IDX 4
-#define ST_TODO_IDX        5
-#define ST_BUFFER_IDX      6
-#define ST_NEW_REQUEST_IDX 7
+#define ST_TODO_IDX        4
+#define ST_BUFFER_IDX      5
 
 /* The FENV contains string keys for each callback, it also contains
  * the following numeric keys:
  */
 #define FENV_BUFFER_IDX      1
-#define FENV_IS_BUFFERED_IDX 2
-#define FENV_NEW_REQUEST_IDX 3
 
-const static char* default_buffer_tbl = "http.parser{default.buffer}";
+/* The set of potentially buffered callbacks.
+ */
+enum {
+    bitset_url              = 0x001,
+    bitset_path             = 0x002,
+    bitset_query_string     = 0x004,
+    bitset_fragment         = 0x008,
+    bitset_header_field     = 0x010,
+    bitset_header_value     = 0x020,
+    bitset_body             = 0x040,
+};
 
-#define DEFAULT_BUFFER_TBL (void*)default_buffer_tbl
+/* How man elements are in the buffer?
+ */
+#define BITSET_LEN 7
+
+/* Map a bitset element into the index used to store buffered output.
+ */
+static int bitset_to_idx(int bitset_elm) {
+    switch ( bitset_elm ) {
+    case bitset_url:          return 1;
+    case bitset_path:         return 2;
+    case bitset_query_string: return 3;
+    case bitset_fragment:     return 4;
+    case bitset_header_field: return 5;
+    case bitset_header_value: return 6;
+    case bitset_body:         return 7;
+    }
+    assert(!"Reachable");
+    return 0;
+}
+
+/* Map a bitset element into the name of the callback.
+ */
+static const char* bitset_to_name(int bitset_elm) {
+    switch ( bitset_elm ) {
+    case bitset_url:          return "on_url";
+    case bitset_path:         return "on_path";
+    case bitset_query_string: return "on_query_string";
+    case bitset_fragment:     return "on_fragment";
+    case bitset_header_field: return "on_header_field";
+    case bitset_header_value: return "on_header_value";
+    case bitset_body:         return "on_body";
+    }
+    assert(!"Reachable");
+    return 0;
+}
+
+/* Map the index of the buffered output back to a bitset element.
+ */
+static int idx_to_bitset(int idx) {
+    switch ( idx ) {
+    case 1: return bitset_url;
+    case 2: return bitset_path;
+    case 3: return bitset_query_string;
+    case 4: return bitset_fragment;
+    case 5: return bitset_header_field;
+    case 6: return bitset_header_value;
+    case 7: return bitset_body;
+    }
+    assert(!"Reachable");
+    return 0;
+}
 
 /* Replaces a table on the top of the stack with a string that
  * concatinates all elements of the numeric keyed elements from the
@@ -49,89 +105,46 @@ static void table_concat(lua_State* L) {
     lua_replace(L, -2);
 }
 
-/* Returns the buffer type of the function at idx.  Assumes
- * ST_IS_BUFFERED_IDX is valid.
- */
-static int lhp_get_buffered(lua_State*L, int fn_idx) {
-    int       buffered;
-
-    lua_pushvalue(L, fn_idx);
-    assert(lua_isfunction(L, -1));
-
-    lua_rawget(L, ST_IS_BUFFERED_IDX);
-
-    buffered = lua_tointeger(L, -1);
-
-    lua_pop(L, 1);
-
-    return buffered;
-}
-
 /* Move everything out of the buffer table and into the todo table
- * EXCEPT if except_fn_idx is non-zero and except_fn_idx is marked as
- * buffered in which case any buffer type 2's (and the execpt_fn_idx)
- * will remain in the todo table.  So, if except_fn_idx is non-zero
- * then this is really a "partial flush".
+ * EXCEPT the specified except_fns (except_fns is a bit set).
  */
-static void flush_buffer(lua_State* L, int except_fn_idx) {
-    int pop = 0;
+static void flush_buffer(lua_State* L, int except_bitset) {
+    int remove_bitset = 0;
+    int mask;
 
-    if ( except_fn_idx                      &&
-         lua_isfunction(L, except_fn_idx)   &&
-         0 != lhp_get_buffered(L, except_fn_idx) )
-    {
-        lua_pushvalue(L, except_fn_idx);
-        pop++;
-    }
-
-    lua_createtable(L, 0, 3);
     lua_pushnil(L);
-
     while ( lua_next(L, ST_BUFFER_IDX) != 0 ) {
-        /* <except-fn>?, <new-buffer-tbl>, <key>, <value> */
-        if ( ( except_fn_idx && lhp_get_buffered(L, -2) > 1 ) ||
-             ( pop &&  lua_rawequal(L, -2, -4) ) )
-        {
-            /* Put it in the new buffer table */
-            lua_pushvalue(L, -2);
-            lua_pushvalue(L, -2);
-            lua_rawset(L, -5);
+        int idx        = lua_tointeger(L, -2);
+        int bitset_elm = idx_to_bitset(idx);
+
+        if ( ! ( bitset_elm & except_bitset ) ) {
+            /* Flush it */
+            lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_elm));
+            if ( lua_isfunction(L, -1) ) {
+                lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
+                assert(lua_istable(L, -1));
+                table_concat(L);
+                lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
+            } else {
+                lua_pop(L, 2);
+            }
+            remove_bitset |= bitset_elm;
         } else {
-            lua_pushvalue(L, -2);
-            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
-
-            lua_pushvalue(L, -1);
-            if ( lua_istable(L, -1) ) table_concat(L);
-            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
+            lua_pop(L, 1);
         }
-        lua_pop(L, 1);
     }
 
-    lua_replace(L, ST_BUFFER_IDX);
-
-    if ( pop ) lua_pop(L, pop);
-}
-
-/* Returns true if the start line was just completed.  We determine
- * that the start line was just completed by checking if this is a
- * "new request" that has http major/minor version set.
- *
- * NOTE: This method is *not* idempotent, simply by calling this
- * method it will no longer return true.
- */
-static int is_start_line_completed(lua_State* L, http_parser* parser) {
-    if ( lua_toboolean(L, ST_NEW_REQUEST_IDX) &&
-         ( parser->http_major || parser->http_minor ) )
-    {
-        lua_pushboolean(L, 0);
-        lua_replace(L, ST_NEW_REQUEST_IDX);
-        return 1;
+    for ( mask=remove_bitset & -remove_bitset; remove_bitset; mask <<= 1 ) {
+        if ( ! ( remove_bitset & mask ) ) continue;
+        remove_bitset &= ~mask;
+        lua_pushnil(L);
+        lua_rawseti(L, ST_BUFFER_IDX, bitset_to_idx(mask));
     }
-    return 0;
 }
 
-/* Post Condition: If a callback exists in FENV for 'name', then the
- * BUFFER table has <func> key set to <false>.
+/* Post Condition: The BUFFER table flushed to TODO and if a callback
+ * exists for 'name' in FENV, then the pair <func>, <false> is pushed
+ * into the TODO table.
  */
 static int lhp_http_cb(http_parser* parser, const char* name) {
     lua_State* L;
@@ -140,94 +153,92 @@ static int lhp_http_cb(http_parser* parser, const char* name) {
     L = (lua_State*)parser->data;
     assert(NULL != L);
 
+    flush_buffer(L, 0);
+
     lua_getfield(L, ST_FENV_IDX, name);
     if ( ! lua_isfunction(L, -1) ) {
         lua_pop(L, 1);
     } else {
+        lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
         lua_pushboolean(L, 0);
-        lua_rawset(L, ST_BUFFER_IDX);
+        lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
     }
-
-    /* Any non-string callbacks trigger global flush */
-    flush_buffer(L, 0);
 
     return 0;
 }
 
 /* Post Condition: If a callback exists in FENV for 'name', then the
  * BUFFER table has <func> key's table appended with str (and if a
- * table doesn't exist, a new one is created).
+ * table doesn't exist, a new one is created).  Also, any buffered
+ * callbacks are flushed except for the callbacks in the except_fns
+ * bitset.
  */
-static int lhp_http_data_cb(http_parser* parser, const char* name, const char* str, size_t len) {
+static int lhp_http_data_cb(http_parser* parser, int bitset_cb, const char* str, size_t len, int except_bitset) {
     lua_State* L;
 
     assert(NULL != parser);
     L = (lua_State*)parser->data;
     assert(NULL != L);
 
-    lua_getfield(L, ST_FENV_IDX, name);
-    if ( lua_isfunction(L, -1) ) {
-        lua_pushvalue(L, -1);
-        lua_rawget(L, ST_BUFFER_IDX);
-        if ( ! lua_istable(L, -1) ) {
+    flush_buffer(L, except_bitset);
+
+    if ( ! except_bitset ) {
+        /* Bypass the "buffer" since nothing is getting buffered */
+        lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_cb));
+        if ( ! lua_isfunction(L, -1) ) {
             lua_pop(L, 1);
-            lua_createtable(L, 1, 0);
-            lua_pushvalue(L, -2);
-            lua_pushvalue(L, -2);
-            lua_rawset(L, ST_BUFFER_IDX);
+        } else {
+            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
+            lua_pushlstring(L, str, len);
+            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
         }
-        lua_pushlstring(L, str, len);
-        lua_rawseti(L, -2, lua_objlen(L, -2) + 1);
-        lua_pop(L, 1);
-    }
-
-    if ( is_start_line_completed(L, parser) ) {
-        flush_buffer(L, 0);
     } else {
-        flush_buffer(L, -1);
+        lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_cb));
+        if ( ! lua_isfunction(L, -1) ) {
+            lua_pop(L, 1);
+        } else {
+            int idx = bitset_to_idx(bitset_cb);
+            lua_rawgeti(L, ST_BUFFER_IDX, idx);
+            if ( ! lua_istable(L, -1) ) {
+                lua_pop(L, 1);
+                lua_createtable(L, 1, 0);
+                lua_pushvalue(L, -1);
+                lua_rawseti(L, ST_BUFFER_IDX, idx);
+            }
+            lua_pushlstring(L, str, len);
+            lua_rawseti(L, -2, lua_objlen(L, -2) + 1);
+            lua_pop(L, 2);
+        }
     }
-    lua_pop(L, 1);
-
     return 0;
 }
 
 static int lhp_message_begin_cb(http_parser* parser) {
-    int        result = lhp_http_cb(parser, "on_message_begin");
-    lua_State* L      = (lua_State*)parser->data;
-
-    /* Reset http version and mark this as a "new request" so we know
-     * when the status/request line got read and therefore we can push
-     * the start_line_complete token.
-     */
-    parser->http_major = parser->http_minor = 0;
-    lua_pushboolean(L, 0);
-    lua_replace(L, ST_NEW_REQUEST_IDX);
-
-    return result;
+    return lhp_http_cb(parser, "on_message_begin");
 }
 
 static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_url", str, len);
+    return lhp_http_data_cb(parser, bitset_url, str, len, bitset_url | bitset_path | bitset_query_string | bitset_fragment);
 }
 
 static int lhp_path_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_path", str, len);
+    return lhp_http_data_cb(parser, bitset_path, str, len, bitset_url | bitset_path);
 }
 
 static int lhp_query_string_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_query_string", str, len);
+    return lhp_http_data_cb(parser, bitset_query_string, str, len, bitset_url | bitset_query_string);
 }
 
 static int lhp_fragment_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_fragment", str, len);
+    return lhp_http_data_cb(parser, bitset_fragment, str, len, bitset_url | bitset_fragment);
 }
 
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_header_field", str, len);
+    return lhp_http_data_cb(parser, bitset_header_field, str, len, bitset_header_field);
 }
 
 static int lhp_header_value_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, "on_header_value", str, len);
+    return lhp_http_data_cb(parser, bitset_header_value, str, len, bitset_header_value);
 }
 
 static int lhp_headers_complete_cb(http_parser* parser) {
@@ -236,35 +247,12 @@ static int lhp_headers_complete_cb(http_parser* parser) {
 
 static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
     int result;
-    result = lhp_http_data_cb(parser, "on_body", str, len);
+    result = lhp_http_data_cb(parser, bitset_body, str, len, 0);
     return result;
 }
 
 static int lhp_message_complete_cb(http_parser* parser) {
     return lhp_http_cb(parser, "on_message_complete");
-}
-
-/* Returns 0 if function should not have events buffered, 1 if events
- * can be buffered, or 2 if the buffering can only occur after a
- * "flush" index.
- */
-static int lhp_get_default_buffered(lua_State* L, int str_idx) {
-    int result = 1;
-    str_idx = abs_index(L, str_idx);
-
-    lua_pushlightuserdata(L, DEFAULT_BUFFER_TBL);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    assert(lua_istable(L, -1));
-
-    lua_pushvalue(L, str_idx);
-    lua_rawget(L, -2);
-
-    if ( lua_isnumber(L, -1) ) {
-        result = lua_tonumber(L, -1);
-    }
-    lua_pop(L, 2);
-
-    return result;
 }
 
 static int lhp_init(lua_State* L, enum http_parser_type type) {
@@ -275,34 +263,21 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
 
     /* Copy functions to new fenv table */
     lua_newtable(L);
-    lua_newtable(L);
     lua_pushnil(L);
     while ( lua_next(L, 1) != 0 ) {
-        /* ..., <tbl fenv>, <tbl buffered?>, <key>, <value> */
+        /* ..., <tbl fenv>, <key>, <value> */
         if ( lua_isstring(L, -2) && lua_isfunction(L, -1) ) {
-            /* Set tbl buffered? */
-            lua_pushvalue(L, -1);
-            lua_pushinteger(L, lhp_get_default_buffered(L, -3));
-            lua_rawset(L, -5);
-
             /* Set tbl fenv */
             lua_pushvalue(L, -2);
             lua_pushvalue(L, -2);
-            lua_rawset(L, -6);
+            lua_rawset(L, -5);
         }
         lua_pop(L, 1);
     }
 
-    /* Save the is buffered table into the fenv */
-    lua_rawseti(L, -2, FENV_IS_BUFFERED_IDX);
-
     /* Save the buffer table into the fenv */
     lua_createtable(L, 0, 3);
     lua_rawseti(L, -2, FENV_BUFFER_IDX);
-
-    /* Save the "new request" flag into the fenv */
-    lua_pushboolean(L, 0);
-    lua_rawseti(L, -2, FENV_NEW_REQUEST_IDX);
 
     /* Save the fenv into the user data */
     lua_setfenv(L, -2);
@@ -332,8 +307,7 @@ static int lhp_response(lua_State* L) {
  *
  * During parser execution the Lua stack will contain:
  *
- * <http_parser>, <str>, <fenv>, <buffer-tbl>, <is-buffered-tbl>,
- * <new-request-bool>, <todo-tbl>
+ * <http_parser>, <str>, <fenv>, <buffer-tbl>, <todo-tbl>
  *
  */
 static int lhp_execute(lua_State* L) {
@@ -360,11 +334,6 @@ static int lhp_execute(lua_State* L) {
     lua_getfenv(L, 1);
     assert(lua_gettop(L) == ST_FENV_IDX);
 
-    /* read-only */
-    lua_rawgeti(L, ST_FENV_IDX, FENV_IS_BUFFERED_IDX);
-    assert(lua_istable(L, -1));
-    assert(lua_gettop(L) == ST_IS_BUFFERED_IDX);
-
     lua_createtable(L, 10, 0);
     assert(lua_gettop(L) == ST_TODO_IDX);
 
@@ -372,17 +341,12 @@ static int lhp_execute(lua_State* L) {
     assert(lua_istable(L, -1));
     assert(lua_gettop(L) == ST_BUFFER_IDX);
 
-    lua_rawgeti(L, ST_FENV_IDX, FENV_NEW_REQUEST_IDX);
-    assert(lua_isboolean(L, -1));
-    assert(lua_gettop(L) == ST_NEW_REQUEST_IDX);
-
     parser->data = L;
     result = http_parser_execute(parser, &settings, str, len);
 
-    assert(lua_gettop(L) == ST_NEW_REQUEST_IDX);
+    assert(lua_gettop(L) == ST_BUFFER_IDX);
 
-    /* Save values back to fenv */
-    lua_rawseti(L, ST_FENV_IDX, FENV_NEW_REQUEST_IDX);
+    /* Save buffer back to fenv */
     lua_rawseti(L, ST_FENV_IDX, FENV_BUFFER_IDX);
 
     lua_pushinteger(L, lua_objlen(L, -1));
@@ -486,32 +450,6 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_setfield(L, -2, "execute");
 
     lua_pop(L, 1);
-
-    /* Default buffer mode */
-    lua_pushlightuserdata(L, DEFAULT_BUFFER_TBL);
-    lua_createtable(L, 0, 4);
-
-    lua_pushliteral(L, "on_body");
-    lua_pushinteger(L, 0);
-    lua_rawset(L, -3);
-
-    lua_pushliteral(L, "on_url");
-    lua_pushinteger(L, 2);
-    lua_rawset(L, -3);
-
-    lua_pushliteral(L, "on_path");
-    lua_pushinteger(L, 2);
-    lua_rawset(L, -3);
-
-    lua_pushliteral(L, "on_query_string");
-    lua_pushinteger(L, 2);
-    lua_rawset(L, -3);
-
-    lua_pushliteral(L, "on_fragment");
-    lua_pushinteger(L, 2);
-    lua_rawset(L, -3);
-
-    lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* export http.parser */
     lua_createtable(L, 0, 2);
