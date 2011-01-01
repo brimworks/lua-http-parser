@@ -276,7 +276,7 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
     }
 
     /* Save the buffer table into the fenv */
-    lua_createtable(L, 0, 3);
+    lua_createtable(L, BITSET_LEN, 0);
     lua_rawseti(L, -2, FENV_BUFFER_IDX);
 
     /* Save the fenv into the user data */

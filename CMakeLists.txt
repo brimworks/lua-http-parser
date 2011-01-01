@@ -36,6 +36,7 @@ install(TARGETS parser
 ## Setup test stuff
 include(CTest)
 add_test(test ${LUA} ${CMAKE_CURRENT_SOURCE_DIR}/test.lua ${CMAKE_CURRENT_SOURCE_DIR}/ ${CMAKE_CURRENT_BINARY_DIR}/)
+add_test(benchmark ${LUA} ${CMAKE_CURRENT_SOURCE_DIR}/benchmark.lua ${CMAKE_CURRENT_SOURCE_DIR}/ ${CMAKE_CURRENT_BINARY_DIR}/)
 set_tests_properties(test
                      PROPERTIES
                      FAIL_REGULAR_EXPRESSION
