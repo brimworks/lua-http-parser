@@ -72,8 +72,13 @@ API:
         HTTP response respectively.  Pass in a table of callbacks that
         are ran when the parser encounters the various fields.  By
         default all callbacks will be ran with the full value for the
-        respective field [but please see BUGS below].  The on_body
-        handler does *not* buffer the value.
+        respective field with the exception of "on_body" which does
+        not buffer.  Note that on_url, on_path, on_query_string, and
+        on_fragment may be called in arbitrary order and are buffered
+        until the complete request line is read.
+
+        Note that responses do not have url/path/query_string/fragment
+        and therefore those callbacks will never be ran.
 
     bytes_read = parser:execute(input_bytes)
 
@@ -106,8 +111,9 @@ API:
         Returns the HTTP status code of a response.  This is only valid
         on HTTP responses.
 
-== BUGS ==
+== TODO ==
 
- * If you register an on_url _and_ an (on_path, on_query_string or
-   on_fragment) handler, then the events will not be properly
-   buffered into a single event.
+ * Expose the "buffer type" to users?  Internally, each callback type
+   is one of three types: non-buffered, buffered, and buffered until
+   "boundaries" (such as complete status line read or complete message
+   header is read).
