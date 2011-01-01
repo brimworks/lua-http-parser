@@ -8,6 +8,12 @@
 #define check_parser(L, narg)                                   \
     ((http_parser*)luaL_checkudata((L), (narg), PARSER_MT))
 
+#define grow_stack(L, count)            \
+    if(!lua_checkstack(L, count)) {     \
+        printf("Lua stack-overflow\n"); \
+        return -1;                      \
+    }
+
 /* The index which contains the userdata fenv */
 #define FENV_IDX 3
 
@@ -75,7 +81,7 @@ static int lhp_http_end_cb(http_parser* parser, int cb_id) {
     assert(NULL != lhp);
     L = lhp->L;
     assert(NULL != L);
-    assert(lua_checkstack(L, 2));
+    grow_stack(L, 2);
 
     if (!CB_FLAG_TEST_HAS_DATA(lhp->flags, cb_id)) {
         return 0;
@@ -95,7 +101,7 @@ static int lhp_http_cb(http_parser* parser, int cb_id) {
     assert(NULL != lhp);
     L = lhp->L;
     assert(NULL != L);
-    assert(lua_checkstack(L, 2));
+    grow_stack(L, 2);
 
     /* push event callback function. */
     lua_rawgeti(L, FENV_IDX, cb_id);
@@ -115,7 +121,7 @@ static int lhp_http_data_cb(http_parser* parser, int cb_id, const char* str, siz
     assert(NULL != lhp);
     L = lhp->L;
     assert(NULL != L);
-    assert(lua_checkstack(L, 2));
+    grow_stack(L, 2);
 
     /* push event callback function. */
     lua_rawgeti(L, FENV_IDX, cb_id);
