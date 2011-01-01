@@ -14,57 +14,58 @@
 
 /* The indices into the Lua stack for various pieces of information */
 #define ST_FENV_IDX        3
-#define ST_TODO_IDX        4
-#define ST_BUFFER_IDX      5
+#define ST_BUFFER_IDX      4
+#define ST_TODO_IDX        5
 
-/* The FENV contains string keys for each callback, it also contains
- * the following numeric keys:
+/* The FENV contains callbacks for each of the CB_IDX_* values and it
+ * contains a buffer table.
  */
-#define FENV_BUFFER_IDX      1
+#define FENV_BUFFER_IDX      CB_IDX_MAX+1
 
-/* The set of potentially buffered callbacks.
+/* The ID of each callback is given a unique bit so it can be used in
+ * a bitset.
  */
-enum {
-    bitset_url              = 0x001,
-    bitset_path             = 0x002,
-    bitset_query_string     = 0x004,
-    bitset_fragment         = 0x008,
-    bitset_header_field     = 0x010,
-    bitset_header_value     = 0x020,
-    bitset_body             = 0x040,
-};
+#define CB_URL_ID           0x001
+#define CB_PATH_ID          0x002
+#define CB_QUERY_STRING_ID  0x004
+#define CB_FRAGMENT_ID      0x008
+#define CB_HEADER_FIELD_ID  0x010
+#define CB_HEADER_VALUE_ID  0x020
+#define CB_BODY_ID          0x040
+#define CB_MESSAGE_BEGIN    0x080
+#define CB_HEADERS_COMPLETE 0x100
+#define CB_MESSAGE_COMPLETE 0x200
 
-/* How man elements are in the buffer?
+/* The index for the callback is represented with these numbers.
  */
-#define BITSET_LEN 7
+#define CB_IDX_URL              1
+#define CB_IDX_PATH             2
+#define CB_IDX_QUERY_STRING     3
+#define CB_IDX_FRAGMENT         4
+#define CB_IDX_HEADER_FIELD     5
+#define CB_IDX_HEADER_VALUE     6
+#define CB_IDX_BODY             7
+#define CB_IDX_MESSAGE_BEGIN    8
+#define CB_IDX_HEADERS_COMPLETE 9
+#define CB_IDX_MESSAGE_COMPLETE 10
+#define CB_IDX_MAX              10
+
+/* Light user data used to represent the registered "name" to callback
+ * table.
+ */
+const char* NAME_TO_CB_IDX = "http.parser{NAME_TO_CB_IDX}";
 
 /* Map a bitset element into the index used to store buffered output.
  */
 static int bitset_to_idx(int bitset_elm) {
     switch ( bitset_elm ) {
-    case bitset_url:          return 1;
-    case bitset_path:         return 2;
-    case bitset_query_string: return 3;
-    case bitset_fragment:     return 4;
-    case bitset_header_field: return 5;
-    case bitset_header_value: return 6;
-    case bitset_body:         return 7;
-    }
-    assert(!"Reachable");
-    return 0;
-}
-
-/* Map a bitset element into the name of the callback.
- */
-static const char* bitset_to_name(int bitset_elm) {
-    switch ( bitset_elm ) {
-    case bitset_url:          return "on_url";
-    case bitset_path:         return "on_path";
-    case bitset_query_string: return "on_query_string";
-    case bitset_fragment:     return "on_fragment";
-    case bitset_header_field: return "on_header_field";
-    case bitset_header_value: return "on_header_value";
-    case bitset_body:         return "on_body";
+    case CB_URL_ID:          return 1;
+    case CB_PATH_ID:         return 2;
+    case CB_QUERY_STRING_ID: return 3;
+    case CB_FRAGMENT_ID:     return 4;
+    case CB_HEADER_FIELD_ID: return 5;
+    case CB_HEADER_VALUE_ID: return 6;
+    case CB_BODY_ID:         return 7;
     }
     assert(!"Reachable");
     return 0;
@@ -72,15 +73,15 @@ static const char* bitset_to_name(int bitset_elm) {
 
 /* Map the index of the buffered output back to a bitset element.
  */
-static int idx_to_bitset(int idx) {
+static int cb_idx_to_id(int idx) {
     switch ( idx ) {
-    case 1: return bitset_url;
-    case 2: return bitset_path;
-    case 3: return bitset_query_string;
-    case 4: return bitset_fragment;
-    case 5: return bitset_header_field;
-    case 6: return bitset_header_value;
-    case 7: return bitset_body;
+    case 1: return CB_URL_ID;
+    case 2: return CB_PATH_ID;
+    case 3: return CB_QUERY_STRING_ID;
+    case 4: return CB_FRAGMENT_ID;
+    case 5: return CB_HEADER_FIELD_ID;
+    case 6: return CB_HEADER_VALUE_ID;
+    case 7: return CB_BODY_ID;
     }
     assert(!"Reachable");
     return 0;
@@ -114,21 +115,26 @@ static void flush_buffer(lua_State* L, int except_bitset) {
 
     lua_pushnil(L);
     while ( lua_next(L, ST_BUFFER_IDX) != 0 ) {
-        int idx        = lua_tointeger(L, -2);
-        int bitset_elm = idx_to_bitset(idx);
+        int cb_idx = lua_tointeger(L, -2);
+        int cb_id  = cb_idx_to_id(cb_idx);
 
-        if ( ! ( bitset_elm & except_bitset ) ) {
+        if ( ! ( cb_id & except_bitset ) ) {
             /* Flush it */
-            lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_elm));
+            lua_rawgeti(L, ST_FENV_IDX, cb_idx);
             if ( lua_isfunction(L, -1) ) {
                 lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
                 assert(lua_istable(L, -1));
                 table_concat(L);
                 lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
             } else {
+                /* If we ever allow people to disable a callback in
+                 * the middle of a parse, then this assert will be
+                 * invalid.
+                 */
+                assert(!"Reachable");
                 lua_pop(L, 2);
             }
-            remove_bitset |= bitset_elm;
+            remove_bitset |= cb_id;
         } else {
             lua_pop(L, 1);
         }
@@ -143,10 +149,10 @@ static void flush_buffer(lua_State* L, int except_bitset) {
 }
 
 /* Post Condition: The BUFFER table flushed to TODO and if a callback
- * exists for 'name' in FENV, then the pair <func>, <false> is pushed
- * into the TODO table.
+ * exists for cb_idx, then the pair <func>, <false> is pushed into the
+ * TODO table.
  */
-static int lhp_http_cb(http_parser* parser, const char* name) {
+static int lhp_http_cb(http_parser* parser, int cb_idx) {
     lua_State* L;
 
     assert(NULL != parser);
@@ -155,7 +161,7 @@ static int lhp_http_cb(http_parser* parser, const char* name) {
 
     flush_buffer(L, 0);
 
-    lua_getfield(L, ST_FENV_IDX, name);
+    lua_rawgeti(L, ST_FENV_IDX, cb_idx);
     if ( ! lua_isfunction(L, -1) ) {
         lua_pop(L, 1);
     } else {
@@ -173,7 +179,7 @@ static int lhp_http_cb(http_parser* parser, const char* name) {
  * callbacks are flushed except for the callbacks in the except_fns
  * bitset.
  */
-static int lhp_http_data_cb(http_parser* parser, int bitset_cb, const char* str, size_t len, int except_bitset) {
+static int lhp_http_data_cb(http_parser* parser, int cb_idx, const char* str, size_t len, int except_bitset) {
     lua_State* L;
 
     assert(NULL != parser);
@@ -182,77 +188,67 @@ static int lhp_http_data_cb(http_parser* parser, int bitset_cb, const char* str,
 
     flush_buffer(L, except_bitset);
 
-    if ( ! except_bitset ) {
+    lua_rawgeti(L, ST_FENV_IDX, cb_idx);
+    if ( ! lua_isfunction(L, -1) ) {
+        lua_pop(L, 1);
+    } else if ( ! (cb_idx_to_id(cb_idx) & except_bitset) ) {
         /* Bypass the "buffer" since nothing is getting buffered */
-        lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_cb));
-        if ( ! lua_isfunction(L, -1) ) {
-            lua_pop(L, 1);
-        } else {
-            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
-            lua_pushlstring(L, str, len);
-            lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
-        }
+        lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
+        lua_pushlstring(L, str, len);
+        lua_rawseti(L, ST_TODO_IDX, lua_objlen(L, ST_TODO_IDX) + 1);
     } else {
-        lua_getfield(L, ST_FENV_IDX, bitset_to_name(bitset_cb));
-        if ( ! lua_isfunction(L, -1) ) {
+        lua_rawgeti(L, ST_BUFFER_IDX, cb_idx);
+        if ( ! lua_istable(L, -1) ) {
             lua_pop(L, 1);
-        } else {
-            int idx = bitset_to_idx(bitset_cb);
-            lua_rawgeti(L, ST_BUFFER_IDX, idx);
-            if ( ! lua_istable(L, -1) ) {
-                lua_pop(L, 1);
-                lua_createtable(L, 1, 0);
-                lua_pushvalue(L, -1);
-                lua_rawseti(L, ST_BUFFER_IDX, idx);
-            }
-            lua_pushlstring(L, str, len);
-            lua_rawseti(L, -2, lua_objlen(L, -2) + 1);
-            lua_pop(L, 2);
+            lua_createtable(L, 1, 0);
+            lua_pushvalue(L, -1);
+            lua_rawseti(L, ST_BUFFER_IDX, cb_idx);
         }
+        lua_pushlstring(L, str, len);
+        lua_rawseti(L, -2, lua_objlen(L, -2) + 1);
+        lua_pop(L, 2);
     }
     return 0;
 }
 
 static int lhp_message_begin_cb(http_parser* parser) {
-    return lhp_http_cb(parser, "on_message_begin");
+    return lhp_http_cb(parser, CB_IDX_MESSAGE_BEGIN);
 }
 
 static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_url, str, len, bitset_url | bitset_path | bitset_query_string | bitset_fragment);
+    return lhp_http_data_cb(parser, CB_IDX_URL, str, len, CB_URL_ID | CB_PATH_ID | CB_QUERY_STRING_ID | CB_FRAGMENT_ID);
 }
 
 static int lhp_path_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_path, str, len, bitset_url | bitset_path);
+    return lhp_http_data_cb(parser, CB_IDX_PATH, str, len, CB_URL_ID | CB_PATH_ID);
 }
 
 static int lhp_query_string_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_query_string, str, len, bitset_url | bitset_query_string);
+    return lhp_http_data_cb(parser, CB_IDX_QUERY_STRING, str, len, CB_URL_ID | CB_QUERY_STRING_ID);
 }
 
 static int lhp_fragment_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_fragment, str, len, bitset_url | bitset_fragment);
+    return lhp_http_data_cb(parser, CB_IDX_FRAGMENT, str, len, CB_URL_ID | CB_FRAGMENT_ID);
 }
 
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_header_field, str, len, bitset_header_field);
+    return lhp_http_data_cb(parser, CB_IDX_HEADER_FIELD, str, len, CB_HEADER_FIELD_ID);
 }
 
 static int lhp_header_value_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, bitset_header_value, str, len, bitset_header_value);
+    return lhp_http_data_cb(parser, CB_IDX_HEADER_VALUE, str, len, CB_HEADER_VALUE_ID);
 }
 
 static int lhp_headers_complete_cb(http_parser* parser) {
-    return lhp_http_cb(parser, "on_headers_complete");
+    return lhp_http_cb(parser, CB_IDX_HEADERS_COMPLETE);
 }
 
 static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
-    int result;
-    result = lhp_http_data_cb(parser, bitset_body, str, len, 0);
-    return result;
+    return lhp_http_data_cb(parser, CB_IDX_BODY, str, len, 0);
 }
 
 static int lhp_message_complete_cb(http_parser* parser) {
-    return lhp_http_cb(parser, "on_message_complete");
+    return lhp_http_cb(parser, CB_IDX_MESSAGE_COMPLETE);
 }
 
 static int lhp_init(lua_State* L, enum http_parser_type type) {
@@ -261,22 +257,34 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
     http_parser* parser = (http_parser*)lua_newuserdata(L, sizeof(http_parser));
     assert(NULL != parser);
 
-    /* Copy functions to new fenv table */
+    /* Push the fenv table */
     lua_newtable(L);
+
+    /* Push the name2idx table */
+    lua_pushlightuserdata(L, (void*)NAME_TO_CB_IDX);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    assert(lua_istable(L, -1));
+
+    /* Copy functions to fenv table */
     lua_pushnil(L);
     while ( lua_next(L, 1) != 0 ) {
-        /* ..., <tbl fenv>, <key>, <value> */
-        if ( lua_isstring(L, -2) && lua_isfunction(L, -1) ) {
-            /* Set tbl fenv */
+        lua_pushvalue(L, -2);
+        lua_rawget(L, -4);
+        /* ..., <tbl fenv>, <name2idx>, <key>, <value>, <idx> */
+        if ( lua_isnumber(L, -1) && lua_isfunction(L, -2) ) {
             lua_pushvalue(L, -2);
-            lua_pushvalue(L, -2);
-            lua_rawset(L, -5);
+            lua_rawset(L, -6);
+            lua_pop(L, 1);
+        } else {
+            lua_pop(L, 2);
         }
-        lua_pop(L, 1);
     }
 
+    /* Remove the name2idx table */
+    lua_pop(L, 1);
+
     /* Save the buffer table into the fenv */
-    lua_createtable(L, BITSET_LEN, 0);
+    lua_createtable(L, CB_IDX_MAX, 0);
     lua_rawseti(L, -2, FENV_BUFFER_IDX);
 
     /* Save the fenv into the user data */
@@ -334,20 +342,17 @@ static int lhp_execute(lua_State* L) {
     lua_getfenv(L, 1);
     assert(lua_gettop(L) == ST_FENV_IDX);
 
-    lua_createtable(L, 10, 0);
-    assert(lua_gettop(L) == ST_TODO_IDX);
-
     lua_rawgeti(L, ST_FENV_IDX, FENV_BUFFER_IDX);
     assert(lua_istable(L, -1));
     assert(lua_gettop(L) == ST_BUFFER_IDX);
 
+    lua_createtable(L, 10, 0);
+    assert(lua_gettop(L) == ST_TODO_IDX);
+
     parser->data = L;
     result = http_parser_execute(parser, &settings, str, len);
 
-    assert(lua_gettop(L) == ST_BUFFER_IDX);
-
-    /* Save buffer back to fenv */
-    lua_rawseti(L, ST_FENV_IDX, FENV_BUFFER_IDX);
+    assert(lua_gettop(L) == ST_TODO_IDX);
 
     lua_pushinteger(L, lua_objlen(L, -1));
     lua_pushinteger(L, result);
@@ -450,6 +455,51 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_setfield(L, -2, "execute");
 
     lua_pop(L, 1);
+
+    lua_pushlightuserdata(L, (void*)NAME_TO_CB_IDX);
+    lua_createtable(L, 0, CB_IDX_MAX);
+
+    lua_pushliteral(L, "on_url");
+    lua_pushinteger(L, CB_IDX_URL);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_path");
+    lua_pushinteger(L, CB_IDX_PATH);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_query_string");
+    lua_pushinteger(L, CB_IDX_QUERY_STRING);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_fragment");
+    lua_pushinteger(L, CB_IDX_FRAGMENT);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_header_field");
+    lua_pushinteger(L, CB_IDX_HEADER_FIELD);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_header_value");
+    lua_pushinteger(L, CB_IDX_HEADER_VALUE);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_body");
+    lua_pushinteger(L, CB_IDX_BODY);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_message_begin");
+    lua_pushinteger(L, CB_IDX_MESSAGE_BEGIN);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_headers_complete");
+    lua_pushinteger(L, CB_IDX_HEADERS_COMPLETE);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "on_message_complete");
+    lua_pushinteger(L, CB_IDX_MESSAGE_COMPLETE);
+    lua_rawset(L, -3);
+
+    lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* export http.parser */
     lua_createtable(L, 0, 2);

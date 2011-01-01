@@ -134,17 +134,17 @@ function init_parser()
    local header_field = nil
 
    function cb.on_message_begin()
-      ok(cur == nil)
-      cur = { headers = {} }
+       ok(cur == nil)
+       cur = { headers = {} }
    end
 
    local fields = { "path", "query_string", "fragment", "url" }
    for _, field in ipairs(fields) do
-      cb["on_" .. field] =
-         function(value)
-            ok(cur[field] == nil, "["..tostring(field).."]=["..tostring(cur[field]).."] .. [" .. tostring(value) .. "]")
-            cur[field] = value;
-         end
+       cb["on_" .. field] =
+           function(value)
+               ok(cur[field] == nil, "["..tostring(field).."]=["..tostring(cur[field]).."] .. [" .. tostring(value) .. "]")
+               cur[field] = value;
+           end
    end
 
    function cb.on_body(value)
@@ -155,21 +155,21 @@ function init_parser()
    end
 
    function cb.on_header_field(value)
-      ok(nil == header_field)
-      header_field = value
+       ok(nil == header_field)
+       header_field = value
    end
 
    function cb.on_header_value(value)
-      ok(header_field ~= nil)
-      ok(cur.headers[header_field] == nil)
-      cur.headers[header_field] = value
-      header_field = nil
+       ok(header_field ~= nil)
+       ok(cur.headers[header_field] == nil)
+       cur.headers[header_field] = value
+       header_field = nil
    end
 
    function cb.on_message_complete()
-      ok(nil ~= cur)
-      table.insert(reqs, cur)
-      cur = nil
+       ok(nil ~= cur)
+       table.insert(reqs, cur)
+       cur = nil
    end
 
    return lhp.request(cb), reqs
