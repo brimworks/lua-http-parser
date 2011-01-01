@@ -25,15 +25,16 @@ requests.ab = {
 }
 
 expects.ab = {
-   path = "/foo/t.html",
-   query_string = "qstring",
-   fragment = "frag",
-   headers = {
-      Host = "localhost:8000",
-      ["User-Agent"] = "ApacheBench/2.3",
-      Accept = "*/*",
-   },
-   body = { "body\n" }
+    path = "/foo/t.html",
+    query_string = "qstring",
+    fragment = "frag",
+    url = "/foo/t.html?qstring#frag",
+    headers = {
+        Host = "localhost:8000",
+        ["User-Agent"] = "ApacheBench/2.3",
+        Accept = "*/*",
+    },
+    body = { "body\n" }
 }
 
 requests.no_buff_body = {
@@ -92,7 +93,7 @@ local function init_parser()
       cur = { headers = {} }
    end
 
-   local fields = { "path", "query_string", "fragment", "on_url" }
+   local fields = { "path", "query_string", "fragment", "url" }
    for _, field in ipairs(fields) do
       cb["on_" .. field] =
          function(value)
