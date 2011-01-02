@@ -1,50 +1,119 @@
 #!/usr/bin/env lua
+
+-- Make it easier to test
+local src_dir, build_dir = ...
+if ( src_dir ) then
+    package.path  = src_dir .. "?.lua;" .. package.path
+    package.cpath = build_dir .. "?.so;" .. package.cpath
+end
+
 local lhp = require 'http.parser'
 
-local expects = {}
-local requests = {}
+local counter = 1
 
--- NOTE: All requests must be version HTTP/1.1 since we re-use the same HTTP parser for all requests.
-requests.ab = {
-   "GET /", "foo/t", ".html?", "qst", "ring", "#fr", "ag ", "HTTP/1.1\r\n",
-   "Ho",
-   "st: loca",
-   "lhos",
-   "t:8000\r\nUser-Agent: ApacheBench/2.3\r\n",
-   "Con", "tent-L", "ength", ": 5\r\n",
-   "Accept: */*\r\n\r",
-   "\nbody\n",
-}
+function ok(assert_true, desc)
+    local msg = ( assert_true and "ok " or "not ok " ) .. counter
+    if ( desc ) then
+        msg = msg .. " - " .. desc
+    end
+    print(msg)
+    counter = counter + 1
+end
 
-expects.ab = {
-   url = "/foo/t.html?qstring#frag",
-   path = "/foo/t.html",
-   query_string = "qstring",
-   fragment = "frag",
-   headers = {
-      Host = "localhost:8000",
-      ["User-Agent"] = "ApacheBench/2.3",
-      Accept = "*/*",
-   },
-   body = "body\n"
-}
+function max_events_test()
+    -- The goal of this test is to generate the most possible events
+    local input_tbl = {
+        "GET / HTTP/1.1\r\n",
+    }
+    -- Generate enough events to trigger a "stack overflow"
+    local header_cnt = 3000
+    for i=1, header_cnt do
+        input_tbl[#input_tbl+1] = "a:\r\n"
+    end
 
-requests.httperf = {
+    local cbs = {}
+    local field_cnt = 0
+    local value_cnt = 0
+    function cbs.on_header_field(field)
+        field_cnt = field_cnt + 1
+    end
+    function cbs.on_header_value(value)
+        value_cnt = value_cnt + 1
+    end
+
+    local parser = lhp.request(cbs)
+    local input = table.concat(input_tbl)
+
+    local result = parser:execute(input)
+
+    input = input:sub(result)
+
+    -- We should have generated a stack overflow event that should be
+    -- handled gracefully... note that
+    ok(field_cnt < header_cnt and field_cnt > 1000,
+       "Expect " .. header_cnt .. " field events, got " .. field_cnt)
+    ok(value_cnt < header_cnt-1 and field_cnt > 1000,
+       "Expect " .. (header_cnt-1) .. " field events, got " .. value_cnt)
+
+    result = parser:execute(input)
+
+    ok(0 == result, "Parser can not continue after stack overflow ["
+       .. tostring(result) .. "]")
+end
+
+function basic_tests()
+    local expects  = {}
+    local requests = {}
+
+    -- NOTE: All requests must be version HTTP/1.1 since we re-use the same HTTP parser for all requests.
+    requests.ab = {
+        "GET /", "foo/t", ".html?", "qst", "ring", "#fr", "ag ", "HTTP/1.1\r\n",
+        "Ho",
+        "st: loca",
+        "lhos",
+        "t:8000\r\nUser-Agent: ApacheBench/2.3\r\n",
+        "Con", "tent-L", "ength", ": 5\r\n",
+        "Accept: */*\r\n\r",
+        "\nbody\n",
+    }
+
+    expects.ab = {
+        path = "/foo/t.html",
+        query_string = "qstring",
+        fragment = "frag",
+        url = "/foo/t.html?qstring#frag",
+        headers = {
+            Host = "localhost:8000",
+            ["User-Agent"] = "ApacheBench/2.3",
+            Accept = "*/*",
+        },
+        body = { "body\n" }
+    }
+
+    requests.no_buff_body = {
+        "GET / HTTP/1.1\r\n",
+        "Host: foo:80\r\n",
+        "Content-Length: 12\r\n",
+        "\r\n",
+        "chunk1", "chunk2",
+    }
+
+    expects.no_buff_body = {
+        body = {
+            "chunk1", "chunk2"
+        }
+    }
+
+    requests.httperf = {
 	"GET / HTTP/1.1\r\n",
 	"Host: localhost\r\n",
 	"User-Agent: httperf/0.9.0\r\n\r\n"
-}
+    }
 
-expects.httperf = {
-   url = "/",
-   path = "/",
-   headers = {
-      Host = "localhost",
-      ["User-Agent"] = "httperf/0.9.0",
-   },
-}
+    expects.httperf = {
+    }
 
-requests.firefox = {
+    requests.firefox = {
 	"GET / HTTP/1.1\r\n",
 	"Host: two.local:8000\r\n",
 	"User-Agent: Mozilla/5.0 (X11; U;",
@@ -58,103 +127,149 @@ requests.firefox = {
 	"Accept-Charset:ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\n",
 	"Keep-Alive: 300\r\n",
 	"Connection:keep-alive\r\n\r\n"
-}
+    }
 
-expects.firefox = {
-   url = "/",
-   path = "/",
-   headers = {
-      ["User-Agent"] = "Mozilla/5.0 (X11; U;Linux i686; en-US; rv:1.9.0.15)Gecko/2009102815 Ubuntu/9.04 (jaunty)Firefox/3.0.15",
-      Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      ["Accept-Language"] = "en-gb,en;q=0.5",
-      ["Accept-Encoding"] = "gzip,deflate",
-      ["Accept-Charset"] = "ISO-8859-1,utf-8;q=0.7,*;q=0.7",
-      ["Keep-Alive"] = "300",
-      Connection = "keep-alive",
-   }
-}
+    expects.firefox = {
+        headers = {
+            ["User-Agent"] = "Mozilla/5.0 (X11; U;Linux i686; en-US; rv:1.9.0.15)Gecko/2009102815 Ubuntu/9.04 (jaunty)Firefox/3.0.15",
+        }
+    }
 
-local function init_parser()
+    local parser, reqs = init_parser()
+
+    for name, data in pairs(requests) do
+        for _, line in ipairs(data) do
+            local bytes_read = parser:execute(line)
+            ok(bytes_read == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."] in ".. name)
+        end
+
+        local got    = reqs[#reqs]
+        local expect = expects[name]
+        ok(parser:method() == "GET", "Method is GET")
+        is_deeply(got, expect, "Check " .. name)
+    end
+end
+
+function buffer_tests()
+    local cb = {}
+    local cb_cnt = 0
+    local cb_val
+
+    function cb.on_path(value)
+        cb_cnt = cb_cnt + 1
+        cb_val = value
+    end
+
+    local req = lhp.request(cb)
+
+    req:execute("GET /pa")
+    req:execute("th?qs")
+
+    ok(cb_cnt == 1, "on_path flushed?")
+    ok(cb_val == "/path", "on_path buffered")
+
+    cb = {}
+    cb_cnt = 0
+    cb_val = nil
+    function cb.on_url(value)
+        cb_cnt = cb_cnt + 1
+        cb_val = value
+    end
+
+    req = lhp.request(cb)
+
+    req:execute("GET /path")
+    req:execute("?qs HTTP/1.1\r\n")
+    req:execute("Header-Field:")
+
+    ok(cb_cnt == 1, "on_url flushed? " .. tostring(cb_cnt))
+    ok(cb_val == "/path?qs", "on_url buffered")
+end
+
+function init_parser()
    local reqs         = {}
    local cur          = nil
    local cb           = {}
    local header_field = nil
 
    function cb.on_message_begin()
-      assert(cur == nil)
-      cur = { headers = {} }
+       ok(cur == nil)
+       cur = { headers = {} }
    end
 
-   -- TODO: If you set a url handler and (path or query_string or
-   -- fragment) handler, then the url event will not be properly
-   -- buffered.
-   local fields = { "url", "path", "query_string", "fragment" }
+   local fields = { "path", "query_string", "fragment", "url" }
    for _, field in ipairs(fields) do
-      cb["on_" .. field] =
-         function(value)
-            assert(cur[field] == nil, "["..tostring(field).."]=["..tostring(cur[field]).."] .. [" .. tostring(value) .. "]")
-            cur[field] = value;
-         end
-   end
-
-   function cb.on_header_field(value)
-      assert(nil == header_field)
-      header_field = value
-   end
-
-   function cb.on_header_value(value)
-      assert(header_field ~= nil)
-      assert(cur.headers[header_field] == nil)
-      cur.headers[header_field] = value
-      header_field = nil
-   end
-
-   function cb.on_headers_complete(value)
-      assert(header_field == nil)
+       cb["on_" .. field] =
+           function(value)
+               ok(cur[field] == nil, "expected ["..tostring(field).."]=nil, but got ["..tostring(cur[field]).."] when setting field [" .. tostring(value) .. "]")
+               cur[field] = value;
+           end
    end
 
    function cb.on_body(value)
-      -- the on_body event is not buffered.
-      if value == nil then return end
-      local cur_body = cur.body or ''
-      cur.body = cur_body .. value
+       if ( nil == cur.body ) then
+           cur.body = {}
+       end
+       table.insert(cur.body, value)
+   end
+
+   function cb.on_header_field(value)
+       ok(nil == header_field)
+       header_field = value
+   end
+
+   function cb.on_header_value(value)
+       ok(header_field ~= nil)
+       ok(cur.headers[header_field] == nil)
+       cur.headers[header_field] = value
+       header_field = nil
    end
 
    function cb.on_message_complete()
-      assert(nil ~= cur)
-      table.insert(reqs, cur)
-      cur = nil
+       ok(nil ~= cur)
+       table.insert(reqs, cur)
+       cur = nil
    end
 
    return lhp.request(cb), reqs
 end
 
-local parser, reqs = init_parser()
-
-local function assert_deeply(got, expect, context)
-   assert(type(expect) == "table", "Expected [" .. context .. "] to be a table")
-   for k, v in pairs(expect) do
-      local ctx = context .. "." .. k
-      if type(expect[k]) == "table" then
-         assert_deeply(got[k], expect[k], ctx)
-      else
-         assert(got[k] == expect[k], "Expected [" .. ctx .. "] to be '" .. tostring(expect[k]) .. "', but got '" .. tostring(got[k]) .. "'")
-      end
-   end
+function is_deeply(got, expect, msg, context)
+    if ( type(expect) ~= "table" ) then
+        print("# Expected [" .. context .. "] to be a table")
+        ok(false, msg)
+        return false
+    end
+    for k, v in pairs(expect) do
+        local ctx
+        if ( nil == context ) then
+            ctx = k
+        else
+            ctx = context .. "." .. k
+        end
+        if type(expect[k]) == "table" then
+            if ( not is_deeply(got[k], expect[k], msg, ctx) ) then
+                return false
+            end
+        else
+            if ( got[k] ~= expect[k] ) then
+                print("# Expected [" .. ctx .. "] to be '"
+                      .. tostring(expect[k]) .. "', but got '"
+                      .. tostring(got[k])
+                      .. "'")
+                ok(false, msg)
+                return false
+            end
+        end
+    end
+    if ( nil == context ) then
+        ok(true, msg);
+    end
+    return true
 end
 
-for name, data in pairs(requests) do
-   for _, line in ipairs(data) do
-      local bytes_read = parser:execute(line)
-      assert(bytes_read == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
-   end
+buffer_tests()
+basic_tests()
+max_events_test()
 
-   local got    = reqs[#reqs]
-   local expect = expects[name]
-   assert(parser:method() == "GET", "Method is GET")
-   assert_deeply(got, expect, name)
-end
-parser = nil
-
-print "ok"
-
+print("1.." .. counter)
