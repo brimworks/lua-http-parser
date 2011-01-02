@@ -19,6 +19,6 @@ build	= {
 	variables = {
 		INSTALL_CMOD = "$(LIBDIR)",
 		CMAKE_BUILD_TYPE = "$(CMAKE_BUILD_TYPE)",
-		CFLAGS = "$(CFLAGS)",
+		["CFLAGS:STRING"] = "$(CFLAGS)",
 	},
 }
