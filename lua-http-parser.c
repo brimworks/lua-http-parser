@@ -117,9 +117,7 @@ static int lhp_table_concat(lua_State *L, int idx, int len) {
 static int lhp_flush_event(http_parser* parser, int cb_id, int buf_idx, int *buf_len) {
     lhttp_parser* lparser = (lhttp_parser*)parser;
     lua_State*    L;
-    luaL_Buffer   b;
     int           len;
-    int           i;
 
     assert(NULL != parser);
     L = (lua_State*)parser->data;
@@ -352,8 +350,6 @@ static int lhp_execute(lua_State* L) {
     size_t        len;
     size_t        result;
     const char*   str = luaL_checklstring(L, 2, &len);
-    luaL_Buffer   buf;
-    int           cb_id;
 
     static const http_parser_settings settings = {
         .on_message_begin    = lhp_message_begin_cb,
