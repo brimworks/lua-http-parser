@@ -24,6 +24,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     ${LUA_INCLUDE_DIR})
 
 add_library(parser MODULE lua-http-parser.c http-parser/http_parser.c)
+target_link_libraries(parser ${LUA_LIBRARIES})
 set_target_properties(parser PROPERTIES PREFIX "")
 set_target_properties(parser PROPERTIES COMPILE_FLAGS "${CFLAGS}")
 set_target_properties(parser PROPERTIES OUTPUT_NAME parser)
