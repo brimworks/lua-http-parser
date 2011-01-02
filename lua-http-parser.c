@@ -8,12 +8,6 @@
 #define check_parser(L, narg)                                   \
     ((http_parser*)luaL_checkudata((L), (narg), PARSER_MT))
 
-#define grow_stack(L, count)            \
-    if(!lua_checkstack(L, count)) {     \
-        printf("Lua stack-overflow\n"); \
-        return -1;                      \
-    }
-
 /* The indexes into the lua stack contain these items */
 #define ST_FENV_IDX   3
 #define ST_BUFFER_IDX 4
@@ -107,7 +101,10 @@ static int lhp_flush(lua_State* L, int buffered_cbs) {
         int cb_flag = CB_ID_TO_FLAG(cb_id);
 
         if ( ! ( cb_flag & buffered_cbs ) ) {
-            grow_stack(L, 10);
+            if ( ! lua_checkstack(L, 5) ) {
+                lua_pop(L, 2);
+                return -1;
+            }
 
             /* <cb_id>, <buffer tbl> */
             assert(lua_istable(L, -1));
@@ -150,7 +147,7 @@ static int lhp_http_cb(http_parser* parser, int cb_id) {
 
     if ( lhp_flush(L, 0) ) return -1;
 
-    grow_stack(L, 10);
+    if ( ! lua_checkstack(L, 5) ) return -1;
 
     /* push event callback function. */
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
@@ -173,7 +170,10 @@ static int lhp_http_data_cb(http_parser* parser, int cb_id, const char* str, siz
     if ( ! lua_isfunction(L, -1) ) {
         lua_pop(L, 1);
     } else if ( ! (CB_ID_TO_FLAG(cb_id) & buffered_cbs) ) {
-        grow_stack(L, 10);
+        if ( ! lua_checkstack(L, 5) ) {
+            lua_pop(L, 1);
+            return -1;
+        }
 
         /* Bypass the "buffer" since nothing is getting buffered */
         lua_pushlstring(L, str, len);

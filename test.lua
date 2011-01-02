@@ -20,6 +20,47 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+function max_events_test()
+    -- The goal of this test is to generate the most possible events
+    local input_tbl = {
+        "GET / HTTP/1.1\r\n",
+    }
+    -- Generate enough events to trigger a "stack overflow"
+    local header_cnt = 3000
+    for i=1, header_cnt do
+        input_tbl[#input_tbl+1] = "a:\r\n"
+    end
+
+    local cbs = {}
+    local field_cnt = 0
+    local value_cnt = 0
+    function cbs.on_header_field(field)
+        field_cnt = field_cnt + 1
+    end
+    function cbs.on_header_value(value)
+        value_cnt = value_cnt + 1
+    end
+
+    local parser = lhp.request(cbs)
+    local input = table.concat(input_tbl)
+
+    local result = parser:execute(input)
+
+    input = input:sub(result)
+
+    -- We should have generated a stack overflow event that should be
+    -- handled gracefully... note that
+    ok(field_cnt < header_cnt and field_cnt > 1000,
+       "Expect " .. header_cnt .. " field events, got " .. field_cnt)
+    ok(value_cnt < header_cnt-1 and field_cnt > 1000,
+       "Expect " .. (header_cnt-1) .. " field events, got " .. value_cnt)
+
+    result = parser:execute(input)
+
+    ok(0 == result, "Parser can not continue after stack overflow ["
+       .. tostring(result) .. "]")
+end
+
 function basic_tests()
     local expects  = {}
     local requests = {}
@@ -211,5 +252,6 @@ end
 
 basic_tests()
 buffer_tests()
+max_events_test()
 
 print("1.." .. counter)
