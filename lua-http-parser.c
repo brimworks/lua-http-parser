@@ -343,11 +343,11 @@ static int lhp_execute(lua_State* L) {
 
     lua_getfenv(L, 1);
     assert(lua_istable(L, -1));
-    assert(lua_getttop(L) == ST_FENV_IDX);
+    assert(lua_gettop(L) == ST_FENV_IDX);
 
     lua_rawgeti(L, ST_FENV_IDX, FENV_BUFFER_IDX);
     assert(lua_istable(L, -1));
-    assert(lua_getttop(L) == ST_BUFFER_IDX);
+    assert(lua_gettop(L) == ST_BUFFER_IDX);
 
     lua_rawgeti(L, ST_FENV_IDX, FENV_URL_IDX);
     assert(lua_istable(L, -1) || !FLAG_HAS_CB(lparser->flags, CB_ON_URL));
