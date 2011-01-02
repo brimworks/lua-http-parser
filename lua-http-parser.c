@@ -87,6 +87,33 @@ typedef struct lhttp_parser {
     int         url_len; /* number of buffered chunks for 'on_url' callback. */
 } lhttp_parser;
 
+static int lhp_table_concat(lua_State *L, int idx, int len) {
+    luaL_Buffer   b;
+    int           i;
+
+    assert(NULL != L);
+
+    /* fast path one chunk case. */
+    if (1 == len) {
+        lua_rawgeti(L, idx, 1);
+        /* remove values from buffer. */
+        lua_pushnil(L);
+        lua_rawseti(L, idx, 1);
+        return 0;
+    }
+    /* do a table concat. */
+    luaL_buffinit(L, &b);
+    for(i = 1; i <= len; i++) {
+        lua_rawgeti(L, idx, i);
+        luaL_addvalue(&b);
+        /* remove values from buffer. */
+        lua_pushnil(L);
+        lua_rawseti(L, idx, i);
+    }
+    luaL_pushresult(&b);
+    return 0;
+}
+
 static int lhp_flush_event(http_parser* parser, int cb_id, int buf_idx, int *buf_len) {
     lhttp_parser* lparser = (lhttp_parser*)parser;
     lua_State*    L;
@@ -114,22 +141,7 @@ static int lhp_flush_event(http_parser* parser, int cb_id, int buf_idx, int *buf
     /* get buffer length. */
     len = *buf_len;
     *buf_len = 0; /* reset buffer length. */
-    /* fast path one chunk case. */
-    if (1 == len) {
-        lua_rawgeti(L, buf_idx, 1);
-        return 0;
-    }
-    /* do a table concat. */
-    luaL_buffinit(L, &b);
-    for(i = 1; i <= len; i++) {
-        lua_rawgeti(L, buf_idx, i);
-        luaL_addvalue(&b);
-        /* remove values from buffer. */
-        lua_pushnil(L);
-        lua_rawseti(L, buf_idx, i);
-    }
-    luaL_pushresult(&b);
-    return 0;
+    return lhp_table_concat(L, buf_idx, len);
 }
 
 static int lhp_http_cb(http_parser* parser, int cb_id) {
@@ -138,10 +150,10 @@ static int lhp_http_cb(http_parser* parser, int cb_id) {
     assert(NULL != parser);
     L = (lua_State*)parser->data;
     assert(NULL != L);
-    grow_stack(L, 2);
 
     /* check if event has a callback function. */
     if (CB_FLAG_TEST_HAS_FUNC(lparser->flags, cb_id)) {
+        grow_stack(L, 2);
         /* push event callback function. */
         lua_rawgeti(L, FENV_IDX, cb_id);
         lua_pushnil(L);
@@ -156,10 +168,10 @@ static int lhp_buffer_data(http_parser* parser, int cb_id, int buf_idx, int *buf
     assert(NULL != parser);
     L = (lua_State*)parser->data;
     assert(NULL != L);
-    grow_stack(L, 2);
 
     /* only buffer chunk if event has a callback function. */
     if (CB_FLAG_TEST_HAS_FUNC(lparser->flags, cb_id)) {
+        grow_stack(L, 2);
         /* insert event chunk into buffer. */
         CB_FLAG_SET_HAS_DATA(lparser->flags, cb_id);
         lua_pushlstring(L, str, len);
@@ -171,7 +183,7 @@ static int lhp_buffer_data(http_parser* parser, int cb_id, int buf_idx, int *buf
 static int lhp_http_data_cb(http_parser* parser, int cb_id, const char* str, size_t len) {
     lhttp_parser* lparser = (lhttp_parser*)parser;
     /* flush previous event. */
-    if (cb_id != lparser->cb_id && CB_NONE != lparser->cb_id) {
+    if (cb_id != lparser->cb_id) {
         lhp_flush_event(parser, lparser->cb_id, BUFFER_IDX, &(lparser->buf_len));
     }
     lparser->cb_id = cb_id;
@@ -193,6 +205,7 @@ static int lhp_flush_body(http_parser* parser) {
     L = (lua_State*)parser->data;
     assert(NULL != L);
 
+    /* check if body had any data. */
     if (!CB_FLAG_TEST_HAS_DATA(lparser->flags, CB_ON_BODY)) {
         return 0;
     }
