@@ -60,7 +60,6 @@ API:
         on_fragment     = function(frag) ... end
         on_header_field = function(hkey) ... end
         on_header_value = function(hval) ... end
-        -- the on_body event is not buffered, a nil value signals the end of the body.
         on_body         = function(body) ... end
 
         on_message_begin    = function() ... end
@@ -71,12 +70,20 @@ API:
 
         Create a new HTTP parser to handle either an HTTP request or
         HTTP response respectively.  Pass in a table of callbacks that
-        are ran when the parser encounters the various fields.  By
-        default all callbacks will be ran with the full value for the
-        respective field [but please see BUGS below].  At some point
-        in the future, the on_body handler should *not* be buffered by
-        default (but at the moment, the entire body has to be read
-        before the on_body handler can execute).
+        are ran when the parser encounters the various fields.  All
+        callbacks will be ran with the full value for that field with
+        on_body being the notible exception.
+
+        If you using LTN12 you need to terminate your streams with
+        nil.  The easy way to do this is to register your on_body
+        function with on_message_complete.
+
+        NOTE: Ry's http parser may call any of these callbacks with a
+        partial value if the input_bytes are split on a "token"
+        boundary.  At this point we always assume that you will want
+        everything except the body to be buffered, but if you have a
+        valid use case for manually setting which callbacks are
+        buffered, please send an email to the author.
 
     bytes_read = parser:execute(input_bytes)
 
@@ -85,6 +92,14 @@ API:
         "upgraded" or was an invalid format.  See parser:is_upgrade()
         below to differentiate between these two events (if you want
         to support an upgraded protocol).
+
+        NOTE: If the input_bytes causes more than about 2000 event
+        callbacks to be executed a short read will occur and any
+        attempt to continue the parse will fail.  If this is a
+        problem, restrict your input to < 8K input_bytes at a time,
+        although in general this is probaly more of a symptom of a
+        DDoS attack and therefore returning status 400 (Bad Request)
+        is probably the best thing to do anyways.
 
     parser:should_keep_alive()
 
@@ -108,7 +123,3 @@ API:
 
         Returns the HTTP status code of a response.  This is only valid
         on HTTP responses.
-
-== BUGS ==
-
- * There is no way to disable buffering of events.
