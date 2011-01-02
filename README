@@ -73,10 +73,13 @@ API:
         HTTP response respectively.  Pass in a table of callbacks that
         are ran when the parser encounters the various fields.  By
         default all callbacks will be ran with the full value for the
-        respective field [but please see BUGS below].  At some point
-        in the future, the on_body handler should *not* be buffered by
-        default (but at the moment, the entire body has to be read
-        before the on_body handler can execute).
+        respective field with the exception of "on_body" which does
+        not buffer.  Note that on_url, on_path, on_query_string, and
+        on_fragment may be called in arbitrary order and are buffered
+        until the complete request line is read.
+
+        Note that responses do not have url/path/query_string/fragment
+        and therefore those callbacks will never be ran.
 
     bytes_read = parser:execute(input_bytes)
 
