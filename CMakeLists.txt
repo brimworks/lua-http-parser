@@ -27,8 +27,6 @@ add_library(parser MODULE lua-http-parser.c http-parser/http_parser.c)
 set_target_properties(parser PROPERTIES PREFIX "")
 set_target_properties(parser PROPERTIES OUTPUT_NAME parser)
 
-target_link_libraries(parser ${LUA_LIBRARIES})
-
 install(TARGETS parser
         DESTINATION "${INSTALL_CMOD}/http")
 
