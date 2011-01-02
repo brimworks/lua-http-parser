@@ -455,9 +455,12 @@ static const char* lhp_execute_lua =
     "  return execute_lua(execute(...))\n"
     "end";
 static void lhp_push_execute_fn(lua_State* L) {
+#ifndef NDEBUG
     int top = lua_gettop(L);
-    int ok  = luaL_loadstring(L, lhp_execute_lua);
-    assert(0 == ok);
+#endif
+    int err  = luaL_loadstring(L, lhp_execute_lua);
+
+    if ( err ) lua_error(L);
 
     lua_pushcfunction(L, lhp_execute);
     lua_call(L, 1, 1);
