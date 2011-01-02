@@ -255,6 +255,10 @@ static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
 }
 
 static int lhp_message_complete_cb(http_parser* parser) {
+    /* Send on_body(nil) message to comply with LTN12 */
+    int result = lhp_http_cb(parser, CB_ON_BODY);
+    if ( 0 != result ) return result;
+
     return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE);
 }
 

@@ -74,9 +74,11 @@ API:
         callbacks will be ran with the full value for that field with
         on_body being the notible exception.
 
-        If you using LTN12 you need to terminate your streams with
-        nil.  The easy way to do this is to register your on_body
-        function with on_message_complete.
+        You can treat the on_body handler as an LTN12 "source" since
+        it is always garanteed to send a terminating on_body(nil)
+        event when the complete body has been read.  Note that the
+        on_body(nil) event will even be sent if there is an empty
+        body.
 
         NOTE: Ry's http parser may call any of these callbacks with a
         partial value if the input_bytes are split on a "token"

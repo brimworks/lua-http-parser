@@ -20,6 +20,36 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+function nil_body_test()
+    local cbs = {}
+    local body_count = 0
+    local body = {}
+    function cbs.on_body(chunk)
+        body[#body+1] = chunk
+        body_count = body_count + 1
+    end
+
+    local parser = lhp.request(cbs)
+    parser:execute("GET / HTTP/1.1\r\n")
+    parser:execute("Transfer-Encoding: chunked\r\n")
+    parser:execute("\r\n")
+    parser:execute("23\r\n")
+    parser:execute("This is the data in the first chunk\r\n")
+    parser:execute("1C\r\n")
+    parser:execute("X and this is the second one\r\n")
+    ok(body_count == 2)
+
+    is_deeply(body,
+              {"This is the data in the first chunk",
+               "X and this is the second one"})
+
+    -- This should cause on_body(nil) to be sent
+    parser:execute("0\r\n\r\n")
+
+    ok(body_count == 3)
+    ok(#body == 2)
+end
+
 function max_events_test()
     -- The goal of this test is to generate the most possible events
     local input_tbl = {
@@ -271,5 +301,6 @@ end
 buffer_tests()
 basic_tests()
 max_events_test()
+nil_body_test()
 
 print("1.." .. counter)
