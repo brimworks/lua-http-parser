@@ -58,8 +58,7 @@ API:
         on_path         = function(path) ... end
         on_query_string = function(qstr) ... end
         on_fragment     = function(frag) ... end
-        on_header_field = function(hkey) ... end
-        on_header_value = function(hval) ... end
+        on_header       = function(hkey, hval) ... end
         on_body         = function(body) ... end
 
         on_message_begin    = function() ... end
