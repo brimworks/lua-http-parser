@@ -111,7 +111,6 @@ local function init_parser()
     local reqs         = {}
     local cur          = nil
     local cb           = {}
-    local header_field = nil
 
     function cb.on_message_begin()
         assert(cur == nil)
@@ -136,16 +135,9 @@ local function init_parser()
         end
     end
 
-    function cb.on_header_field(value)
-        assert(nil == header_field)
-        header_field = value
-    end
-
-    function cb.on_header_value(value)
-        assert(header_field ~= nil)
-        assert(cur.headers[header_field] == nil)
-        cur.headers[header_field] = value
-        header_field = nil
+    function cb.on_header(field, value)
+        assert(cur.headers[field] == nil)
+        cur.headers[field] = value
     end
 
     function cb.on_message_complete()
@@ -164,8 +156,7 @@ local null_cbs = {
     "message_begin",
     on_path = null_cb, on_query_string = null_cb, on_fragment = null_cb,
     on_url = null_cb,
-    on_header_field = null_cb,
-    on_header_value = null_cb,
+    on_header = null_cb,
     on_headers_complete = null_cb,
     on_body = null_cb,
     on_message_complete = null_cb,
