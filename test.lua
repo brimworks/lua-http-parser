@@ -20,6 +20,36 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+function nil_body_test()
+    local cbs = {}
+    local body_count = 0
+    local body = {}
+    function cbs.on_body(chunk)
+        body[#body+1] = chunk
+        body_count = body_count + 1
+    end
+
+    local parser = lhp.request(cbs)
+    parser:execute("GET / HTTP/1.1\r\n")
+    parser:execute("Transfer-Encoding: chunked\r\n")
+    parser:execute("\r\n")
+    parser:execute("23\r\n")
+    parser:execute("This is the data in the first chunk\r\n")
+    parser:execute("1C\r\n")
+    parser:execute("X and this is the second one\r\n")
+    ok(body_count == 2)
+
+    is_deeply(body,
+              {"This is the data in the first chunk",
+               "X and this is the second one"})
+
+    -- This should cause on_body(nil) to be sent
+    parser:execute("0\r\n\r\n")
+
+    ok(body_count == 3)
+    ok(#body == 2)
+end
+
 function max_events_test()
     -- The goal of this test is to generate the most possible events
     local input_tbl = {
@@ -33,12 +63,8 @@ function max_events_test()
 
     local cbs = {}
     local field_cnt = 0
-    local value_cnt = 0
-    function cbs.on_header_field(field)
+    function cbs.on_header(field, value)
         field_cnt = field_cnt + 1
-    end
-    function cbs.on_header_value(value)
-        value_cnt = value_cnt + 1
     end
 
     local parser = lhp.request(cbs)
@@ -52,8 +78,6 @@ function max_events_test()
     -- handled gracefully... note that
     ok(field_cnt < header_cnt and field_cnt > 1000,
        "Expect " .. header_cnt .. " field events, got " .. field_cnt)
-    ok(value_cnt < header_cnt-1 and field_cnt > 1000,
-       "Expect " .. (header_cnt-1) .. " field events, got " .. value_cnt)
 
     result = parser:execute(input)
 
@@ -190,7 +214,6 @@ function init_parser()
    local reqs         = {}
    local cur          = nil
    local cb           = {}
-   local header_field = nil
 
    function cb.on_message_begin()
        ok(cur == nil)
@@ -213,16 +236,9 @@ function init_parser()
        table.insert(cur.body, value)
    end
 
-   function cb.on_header_field(value)
-       ok(nil == header_field)
-       header_field = value
-   end
-
-   function cb.on_header_value(value)
-       ok(header_field ~= nil)
-       ok(cur.headers[header_field] == nil)
-       cur.headers[header_field] = value
-       header_field = nil
+   function cb.on_header(field, value)
+       ok(cur.headers[field] == nil)
+       cur.headers[field] = value
    end
 
    function cb.on_message_complete()
@@ -271,5 +287,6 @@ end
 buffer_tests()
 basic_tests()
 max_events_test()
+nil_body_test()
 
 print("1.." .. counter)
