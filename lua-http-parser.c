@@ -176,8 +176,7 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id, int buf_idx, int* buf_len
     FLAG_RM_BUF(lparser->flags, cb_id);
     if ( CB_ON_HEADER == cb_id ) {
         if ( FLAG_HAS_HFIELD(lparser->flags) ) {
-            /* Push <cnt>, <func>, <arg1>[, <arg2>] */
-            lua_pushinteger(L, 3);
+            /* Push <func>, <arg1>[, <arg2>] */
             lua_rawgeti(L, ST_FENV_IDX, cb_id);
             lua_rawgeti(L, buf_idx, 1);
             lua_pushnil(L);
@@ -194,8 +193,7 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id, int buf_idx, int* buf_len
             *buf_len = 1;
         }
     } else {
-        /* Push <cnt>, <func>[, <arg1> */
-        lua_pushinteger(L, 2);
+        /* Push <func>[, <arg1> */
         lua_rawgeti(L, ST_FENV_IDX, cb_id);
 
         begin    = 1;
@@ -242,7 +240,7 @@ static int lhp_buffer(lhttp_parser* lparser, int cb_id, int buf_idx, int *buf_le
 }
 
 /* Push the zero argument event for cb_id.  Post condition:
- *  Lua stack contains 1, <func>
+ *  Lua stack contains <func>, nil
  */
 static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
     lua_State* L = (lua_State*)lparser->parser.data;
@@ -251,8 +249,8 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
 
     if ( ! lua_checkstack(L, 5) ) return -1;
 
-    lua_pushinteger(L, 1);
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
+    lua_pushnil(L);
 
     return 0;
 }
@@ -364,7 +362,6 @@ static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
 
     if ( ! lua_checkstack(L, 5) ) return -1;
 
-    lua_pushinteger(L, 2);
     lua_rawgeti(L, ST_FENV_IDX, CB_ON_BODY);
     lua_pushlstring(L, str, len);
 
@@ -538,21 +535,17 @@ static int lhp_status_code(lua_State* L) {
  * can yield without having to apply the CoCo patch to Lua. */
 static const char* lhp_execute_lua =
     "local c_execute = ...\n"
-    "local function execute(result, cnt, cb, arg1, arg2, ...)\n"
-    "    if ( not cnt ) then\n"
+    "local type = type\n"
+    "local function execute(result, cb, arg1, arg2, ...)\n"
+    "    if ( not cb ) then\n"
     "        return result\n"
     "    end\n"
-    "    if ( cnt == 3 ) then\n"
-    "        cb(arg1, arg2)\n"
-    "        return execute(result, ...)\n"
-    "    end\n"
-    "    if ( cnt == 2 ) then\n"
+    "    if ( type(arg2) == 'function' ) then\n"
     "        cb(arg1)\n"
     "        return execute(result, arg2, ...)"
     "    end\n"
-    /*   if ( cnt == 1 ) then */
-    "    cb()\n"
-    "    return execute(result, arg1, arg2, ...)\n"
+    "    cb(arg1, arg2)\n"
+    "    return execute(result, ...)\n"
     "end\n"
     "return function(...)\n"
     "    return execute(c_execute(...))\n"
