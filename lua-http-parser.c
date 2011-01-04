@@ -531,16 +531,21 @@ static int lhp_status_code(lua_State* L) {
     return 1;
 }
 
+static int lhp_is_function(lua_State* L) {
+    lua_pushboolean(L, lua_isfunction(L, 1));
+    return 1;
+}
+
 /* The execute method has a "lua based stub" so that callbacks
  * can yield without having to apply the CoCo patch to Lua. */
 static const char* lhp_execute_lua =
-    "local c_execute = ...\n"
+    "local c_execute, is_function = ...\n"
     "local type = type\n"
     "local function execute(result, cb, arg1, arg2, ...)\n"
     "    if ( not cb ) then\n"
     "        return result\n"
     "    end\n"
-    "    if ( type(arg2) == 'function' ) then\n"
+    "    if ( is_function(arg2) ) then\n"
     "        cb(arg1)\n"
     "        return execute(result, arg2, ...)"
     "    end\n"
@@ -559,7 +564,8 @@ static void lhp_push_execute_fn(lua_State* L) {
     if ( err ) lua_error(L);
 
     lua_pushcfunction(L, lhp_execute);
-    lua_call(L, 1, 1);
+    lua_pushcfunction(L, lhp_is_function);
+    lua_call(L, 2, 1);
 
     /* Compiled lua function should be at the top of the stack now. */
     assert(lua_gettop(L) == top + 1);
