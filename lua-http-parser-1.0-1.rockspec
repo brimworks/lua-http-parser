@@ -3,8 +3,8 @@
 package = 'lua-http-parser'
 version = '1.0-1'
 source  = {
-    dir = 'brimworks-lua-http-parser-4859974',
-    url = 'https://nodeload.github.com/brimworks/lua-http-parser/zipball/v1.0?_=.zip'
+    url    = 'git://github.com/brimworks/lua-http-parser.git',
+    branch = 'v1.0',
 }
 description = {
     summary  = "A Lua binding to Ryan Dahl's http request/response parser.",
