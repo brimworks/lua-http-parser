@@ -525,6 +525,13 @@ static int lhp_method(lua_State* L) {
     return 1;
 }
 
+static int lhp_version(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    lua_pushnumber(L, lparser->parser.http_major);
+    lua_pushnumber(L, lparser->parser.http_minor);
+    return 2;
+}
+
 static int lhp_status_code(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     lua_pushnumber(L, lparser->parser.status_code);
@@ -584,6 +591,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushcfunction(L, lhp_method);
     lua_setfield(L, -2, "method");
+
+    lua_pushcfunction(L, lhp_version);
+    lua_setfield(L, -2, "version");
 
     lua_pushcfunction(L, lhp_status_code);
     lua_setfield(L, -2, "status_code");
