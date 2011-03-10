@@ -20,6 +20,108 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+local pipeline = [[
+GET / HTTP/1.1
+Host: localhost
+User-Agent: httperf/0.9.0
+Connection: keep-alive
+
+GET /header.jpg HTTP/1.1
+Host: localhost
+User-Agent: httperf/0.9.0
+Connection: keep-alive
+
+]]
+pipeline = pipeline:gsub('\n', '\r\n')
+
+function pipeline_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.request(cbs)
+    ok(parser:execute(pipeline) == #pipeline)
+    ok(parser:execute('') == 0)
+
+    ok(parser:should_keep_alive() == true)
+    ok(parser:method() == "GET")
+    ok(complete_count == 2)
+    ok(#body == 0)
+end
+
+
+-- NOTE: http-parser fails if the first response is HTTP 1.0:
+-- HTTP/1.0 100 Please continue mate.
+-- Which I think is a HTTP spec violation, but other HTTP clients, still work.
+-- http-parser will fail by seeing only one HTTP response and putting everything elses in
+-- the response body for the first 100 response, until socket close.
+local please_continue = [[
+HTTP/1.1 100 Please continue mate.
+
+HTTP/1.1 200 OK
+Date: Wed, 02 Feb 2011 00:50:50 GMT
+Content-Length: 10
+Connection: close
+
+0123456789]]
+please_continue = please_continue:gsub('\n', '\r\n')
+
+function please_continue_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.response(cbs)
+    parser:execute(please_continue)
+    parser:execute('')
+
+    ok(parser:should_keep_alive() == false)
+    ok(parser:status_code() == 200)
+    ok(complete_count == 2)
+    ok(#body == 10)
+end
+
+local connection_close = [[
+HTTP/1.1 200 OK
+Date: Wed, 02 Feb 2011 00:50:50 GMT
+Connection: close
+
+0123456789]]
+connection_close = connection_close:gsub('\n', '\r\n')
+
+function connection_close_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.response(cbs)
+    parser:execute(connection_close)
+    parser:execute('')
+
+    ok(parser:should_keep_alive() == false)
+    ok(parser:status_code() == 200)
+    ok(complete_count == 1)
+    ok(#body == 10)
+end
+
 function nil_body_test()
     local cbs = {}
     local body_count = 0
@@ -288,5 +390,8 @@ buffer_tests()
 basic_tests()
 max_events_test()
 nil_body_test()
+pipeline_test()
+please_continue_test()
+connection_close_test()
 
 print("1.." .. counter)
