@@ -14,10 +14,16 @@ endif()
 
 
 ## setup git submodules
-execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                COMMAND git submodule init)
-execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                COMMAND git submodule update)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/")
+    execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    COMMAND git submodule init)
+    execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    COMMAND git submodule update)
+else()
+    execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    COMMAND git clone "git://github.com/ry/http-parser.git")
+endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}
                     ${CMAKE_CURRENT_SOURCE_DIR}/http-parser

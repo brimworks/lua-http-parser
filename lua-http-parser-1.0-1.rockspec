@@ -1,9 +1,10 @@
 #!/usr/bin/env lua
 
 package = 'lua-http-parser'
-version = 'scm-0'
-source = {
-    url = 'git://github.com/brimworks/lua-http-parser.git'
+version = '1.0-1'
+source  = {
+    url    = 'git://github.com/brimworks/lua-http-parser.git',
+    branch = 'v1.0',
 }
 description = {
     summary  = "A Lua binding to Ryan Dahl's http request/response parser.",
@@ -14,7 +15,7 @@ description = {
 dependencies = {
     'lua >= 5.1'
 }
-build = {
+build    = {
     type = 'cmake',
     variables = {
         INSTALL_CMOD      = "$(LIBDIR)",
