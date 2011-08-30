@@ -20,6 +20,124 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+local function parse_path_query_fragment(uri)
+    local path, query, fragment, off
+    -- parse path
+    path, off = uri:match('([^?]*)()')
+    -- parse query
+    if uri:sub(off, off) == '?' then
+        query, off = uri:match('([^#]*)()', off + 1)
+    end
+    -- parse fragment
+    if uri:sub(off, off) == '#' then
+        fragment = uri:sub(off + 1)
+        off = #uri
+    end
+    return path or '/', query, fragment
+end
+
+local pipeline = [[
+GET / HTTP/1.1
+Host: localhost
+User-Agent: httperf/0.9.0
+Connection: keep-alive
+
+GET /header.jpg HTTP/1.1
+Host: localhost
+User-Agent: httperf/0.9.0
+Connection: keep-alive
+
+]]
+pipeline = pipeline:gsub('\n', '\r\n')
+
+function pipeline_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.request(cbs)
+    ok(parser:execute(pipeline) == #pipeline)
+    ok(parser:execute('') == 0)
+
+    ok(parser:should_keep_alive() == true)
+    ok(parser:method() == "GET")
+    ok(complete_count == 2)
+    ok(#body == 0)
+end
+
+
+-- NOTE: http-parser fails if the first response is HTTP 1.0:
+-- HTTP/1.0 100 Please continue mate.
+-- Which I think is a HTTP spec violation, but other HTTP clients, still work.
+-- http-parser will fail by seeing only one HTTP response and putting everything elses in
+-- the response body for the first 100 response, until socket close.
+local please_continue = [[
+HTTP/1.1 100 Please continue mate.
+
+HTTP/1.1 200 OK
+Date: Wed, 02 Feb 2011 00:50:50 GMT
+Content-Length: 10
+Connection: close
+
+0123456789]]
+please_continue = please_continue:gsub('\n', '\r\n')
+
+function please_continue_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.response(cbs)
+    parser:execute(please_continue)
+    parser:execute('')
+
+    ok(parser:should_keep_alive() == false)
+    ok(parser:status_code() == 200)
+    ok(complete_count == 2)
+    ok(#body == 10)
+end
+
+local connection_close = [[
+HTTP/1.1 200 OK
+Date: Wed, 02 Feb 2011 00:50:50 GMT
+Connection: close
+
+0123456789]]
+connection_close = connection_close:gsub('\n', '\r\n')
+
+function connection_close_test()
+    local cbs = {}
+    local complete_count = 0
+    local body = ''
+    function cbs.on_body(chunk)
+        if chunk then body = body .. chunk end
+    end
+    function cbs.on_message_complete()
+        complete_count = complete_count + 1
+    end
+
+    local parser = lhp.response(cbs)
+    parser:execute(connection_close)
+    parser:execute('')
+
+    ok(parser:should_keep_alive() == false)
+    ok(parser:status_code() == 200)
+    ok(complete_count == 1)
+    ok(#body == 10)
+end
+
 function nil_body_test()
     local cbs = {}
     local body_count = 0
@@ -179,19 +297,6 @@ function buffer_tests()
     local cb_cnt = 0
     local cb_val
 
-    function cb.on_path(value)
-        cb_cnt = cb_cnt + 1
-        cb_val = value
-    end
-
-    local req = lhp.request(cb)
-
-    req:execute("GET /pa")
-    req:execute("th?qs")
-
-    ok(cb_cnt == 1, "on_path flushed?")
-    ok(cb_val == "/path", "on_path buffered")
-
     cb = {}
     cb_cnt = 0
     cb_val = nil
@@ -220,13 +325,11 @@ function init_parser()
        cur = { headers = {} }
    end
 
-   local fields = { "path", "query_string", "fragment", "url" }
-   for _, field in ipairs(fields) do
-       cb["on_" .. field] =
-           function(value)
-               ok(cur[field] == nil, "expected ["..tostring(field).."]=nil, but got ["..tostring(cur[field]).."] when setting field [" .. tostring(value) .. "]")
-               cur[field] = value;
-           end
+   function cb.on_url(value)
+       ok(cur.url == nil, "expected [url]=nil, but got ["..tostring(cur.url)..
+           "] when setting field [" .. tostring(value) .. "]")
+       cur.url = value;
+       cur.path, cur.query_string, cur.fragment = parse_path_query_fragment(value)
    end
 
    function cb.on_body(value)
@@ -288,5 +391,8 @@ buffer_tests()
 basic_tests()
 max_events_test()
 nil_body_test()
+pipeline_test()
+please_continue_test()
+connection_close_test()
 
 print("1.." .. counter)

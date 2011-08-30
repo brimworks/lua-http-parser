@@ -55,9 +55,6 @@ API:
 
     parser = lhp.request {
         on_url          = function(url)  ... end
-        on_path         = function(path) ... end
-        on_query_string = function(qstr) ... end
-        on_fragment     = function(frag) ... end
         on_header       = function(hkey, hval) ... end
         on_body         = function(body) ... end
 
@@ -115,10 +112,18 @@ API:
         Returns true if the input request wants to "upgrade" to a
         different protocol.
 
+    parser:version()
+
+        Returns HTTP version as two numbers (major, minor).
+
     parser:method()
 
         Returns the name of the request method.  This is only valid
         on HTTP requests.
+
+    parser:error()
+
+        Returns errno(number), error name(string), error description(string).
 
     parser:status_code()
 
