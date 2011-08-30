@@ -11,8 +11,7 @@
 /* The Lua stack indices */
 #define ST_FENV_IDX   3
 #define ST_BUFFER_IDX 4
-#define ST_URL_IDX    5
-#define ST_LEN        ST_URL_IDX
+#define ST_LEN        ST_BUFFER_IDX
 
 /* Callback identifiers are indices into the fenv table where the
  * callback is saved.  If you add/remove/change anything about these,
@@ -20,22 +19,16 @@
  */
 #define CB_ON_MESSAGE_BEGIN      1
 #define CB_ON_URL                2
-#define CB_ON_PATH               3
-#define CB_ON_QUERY_STRING       4
-#define CB_ON_FRAGMENT           5
-#define CB_ON_HEADER             6
-#define CB_ON_HEADERS_COMPLETE   7
-#define CB_ON_BODY               8
-#define CB_ON_MESSAGE_COMPLETE   9
+#define CB_ON_HEADER             3
+#define CB_ON_HEADERS_COMPLETE   4
+#define CB_ON_BODY               5
+#define CB_ON_MESSAGE_COMPLETE   6
 #define CB_LEN                   (sizeof(lhp_callback_names)/sizeof(*lhp_callback_names))
 
 static const char *lhp_callback_names[] = {
     /* The MUST be in the same order as the above callbacks */
     "on_message_begin",
     "on_url",
-    "on_path",
-    "on_query_string",
-    "on_fragment",
     "on_header",
     "on_headers_complete",
     "on_body",
@@ -44,20 +37,15 @@ static const char *lhp_callback_names[] = {
 
 /* Non-callback FENV indices. */
 #define FENV_BUFFER_IDX         CB_LEN + 1
-#define FENV_URL_IDX            CB_LEN + 2
-#define FENV_LEN                FENV_URL_IDX
+#define FENV_LEN                FENV_BUFFER_IDX
 
-#define CB_ID_TO_CB_BIT(cb_id)  (1<<(cb_id))
-#define CB_ID_TO_BUF_BIT(cb_id) (1<<((cb_id)+CB_LEN))
+#define FLAGS_BUF_CB_ID_BITS 3
+#define FLAGS_BUF_CB_ID_MASK ((1<<(FLAGS_BUF_CB_ID_BITS))-1)
+/* Get the cb_id that has information stored in buff */
+#define FLAG_GET_BUF_CB_ID(flags) ((flags) & FLAGS_BUF_CB_ID_MASK)
 
-/* Git the cb_id that has information stored in buff */
-#define FLAG_GET_BUF_CB_ID(flags) lhp_buf_bit_to_cb_id \
-    ( (flags) &                                    \
-      (CB_ID_TO_BUF_BIT(CB_ON_PATH)         |      \
-       CB_ID_TO_BUF_BIT(CB_ON_QUERY_STRING) |      \
-       CB_ID_TO_BUF_BIT(CB_ON_FRAGMENT)     |      \
-       CB_ID_TO_BUF_BIT(CB_ON_HEADER)       |      \
-       0) )
+#define FLAGS_CB_ID_FIRST_BIT (1<<(FLAGS_BUF_CB_ID_BITS))
+#define CB_ID_TO_CB_BIT(cb_id)  ((FLAGS_CB_ID_FIRST_BIT)<<(cb_id))
 
 /* Test/set/remove a bit from the flags field of lhttp_parser.  The
  * FLAG_*_CB() macros test/set/remove the bit that signifies that a
@@ -73,32 +61,20 @@ static const char *lhp_callback_names[] = {
 #define FLAG_SET_CB(flags, cb_id)  ( (flags) |=  CB_ID_TO_CB_BIT(cb_id) )
 #define FLAG_RM_CB(flags, cb_id)   ( (flags) &= ~CB_ID_TO_CB_BIT(cb_id) )
 
-#define FLAG_HAS_BUF(flags, cb_id) ( (flags) &   CB_ID_TO_BUF_BIT(cb_id) )
-#define FLAG_SET_BUF(flags, cb_id) ( (flags) |=  CB_ID_TO_BUF_BIT(cb_id) )
-#define FLAG_RM_BUF(flags, cb_id)  ( (flags) &= ~CB_ID_TO_BUF_BIT(cb_id) )
+#define FLAG_HAS_BUF(flags, cb_id) ( FLAG_GET_BUF_CB_ID(flags) == cb_id )
+#define FLAG_SET_BUF(flags, cb_id) ( (flags) = (((flags) & ~FLAGS_BUF_CB_ID_MASK) \
+  | ((cb_id) & FLAGS_BUF_CB_ID_MASK)) )
+#define FLAG_RM_BUF(flags, cb_id)  ( (flags) &= ~FLAGS_BUF_CB_ID_MASK )
 
-#define FLAG_HAS_HFIELD(flags)     ( (flags) & 1 )
-#define FLAG_SET_HFIELD(flags)     ( (flags) |= 1 )
-#define FLAG_RM_HFIELD(flags)      ( (flags) &= ~1 )
+#define FLAG_HAS_HFIELD(flags)     ( ((flags) & FLAGS_CB_ID_FIRST_BIT) >> FLAGS_BUF_CB_ID_BITS )
+#define FLAG_SET_HFIELD(flags)     ( (flags) |= FLAGS_CB_ID_FIRST_BIT )
+#define FLAG_RM_HFIELD(flags)      ( (flags) &= ~FLAGS_CB_ID_FIRST_BIT )
 
 typedef struct lhttp_parser {
     http_parser parser;     /* embedded http_parser. */
     int         flags;      /* See above flag test/set/remove macros. */
     int         buf_len;    /* number of buffered chunks for current callback. */
-    int         url_len;    /* number of buffered chunks for 'on_url' callback. */
 } lhttp_parser;
-
-/* Translate a "buf bit" into the cb_id.
- */
-static inline int lhp_buf_bit_to_cb_id(int flags) {
-    switch ( flags ) {
-    case CB_ID_TO_BUF_BIT(CB_ON_PATH):         return CB_ON_PATH;
-    case CB_ID_TO_BUF_BIT(CB_ON_QUERY_STRING): return CB_ON_QUERY_STRING;
-    case CB_ID_TO_BUF_BIT(CB_ON_FRAGMENT):     return CB_ON_FRAGMENT;
-    case CB_ID_TO_BUF_BIT(CB_ON_HEADER):       return CB_ON_HEADER;
-    }
-    return 0;
-}
 
 /* Concatinate and remove elements from the table at idx starting at
  * element begin and going to length len.  The final concatinated string
@@ -135,13 +111,12 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
     return 0;
 }
 
-/* "Flush" the buffer at buf_idx of length buf_len for the callback
- * identified by cb_id.  The CB_ON_HEADER cb_id is flushed by
- * inspecting FLAG_HAS_HFIELD().  If that bit is not set, then the
- * buffer at buf_idx is concatinated into a single string element in
- * the buffer and nothing is pushed on the Lua stack.  Otherwise the
- * buffer table is cleared after pushing the following onto the Lua
- * stack:
+/* "Flush" the buffer for the callback identified by cb_id.  The
+ * CB_ON_HEADER cb_id is flushed by inspecting FLAG_HAS_HFIELD().
+ * If that bit is not set, then the buffer is concatinated into
+ * a single string element in the buffer and nothing is pushed
+ * on the Lua stack.  Otherwise the buffer table is cleared after
+ * pushing the following onto the Lua stack:
  *
  *   CB_ON_HEADER function,
  *   first element of the buffer,
@@ -154,22 +129,16 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
  *   first - length elements of the buffer concatinated
  *   
  */
-static int lhp_flush(lhttp_parser* lparser, int cb_id, int buf_idx, int* buf_len) {
+static int lhp_flush(lhttp_parser* lparser, int cb_id) {
     lua_State*    L = (lua_State*)lparser->parser.data;
     int           begin, len, result, top, save;
 
     assert(cb_id);
     assert(FLAG_HAS_BUF(lparser->flags, cb_id));
-    assert(CB_ON_URL==cb_id ?
-           ST_URL_IDX    == buf_idx :
-           ST_BUFFER_IDX == buf_idx);
-    assert(CB_ON_URL==cb_id ?
-           &lparser->url_len == buf_len :
-           &lparser->buf_len == buf_len);
 
     if ( ! lua_checkstack(L, 7) ) return -1;
 
-    len   = *buf_len;
+    len   = lparser->buf_len;
     begin = 1;
     top   = lua_gettop(L);
 
@@ -178,19 +147,19 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id, int buf_idx, int* buf_len
         if ( FLAG_HAS_HFIELD(lparser->flags) ) {
             /* Push <func>, <arg1>[, <arg2>] */
             lua_rawgeti(L, ST_FENV_IDX, cb_id);
-            lua_rawgeti(L, buf_idx, 1);
+            lua_rawgeti(L, ST_BUFFER_IDX, 1);
             lua_pushnil(L);
-            lua_rawseti(L, buf_idx, 1);
+            lua_rawseti(L, ST_BUFFER_IDX, 1);
 
             begin    = 2;
             save     = 0;
-            *buf_len = 0;
+            lparser->buf_len = 0;
             FLAG_RM_HFIELD(lparser->flags);
         } else {
             /* Save */
             begin    = 1;
             save     = 1;
-            *buf_len = 1;
+            lparser->buf_len = 1;
         }
     } else {
         /* Push <func>[, <arg1> */
@@ -198,34 +167,28 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id, int buf_idx, int* buf_len
 
         begin    = 1;
         save     = 0;
-        *buf_len = 0;
+        lparser->buf_len = 0;
     }
 
-    result = lhp_table_concat_and_clear(L, buf_idx, begin, len);
+    result = lhp_table_concat_and_clear(L, ST_BUFFER_IDX, begin, len);
     if ( 0 != result ) {
         lua_settop(L, top);
         return result;
     }
 
-    if ( save ) lua_rawseti(L, buf_idx, 1);
+    if ( save ) lua_rawseti(L, ST_BUFFER_IDX, 1);
 
     return 0;
 }
 
-/* Puts the str of length len into the buffer table at buf_idx and
+/* Puts the str of length len into the buffer table and
  * updates buf_len.  It also sets the buf flag for cb_id.
  */
-static int lhp_buffer(lhttp_parser* lparser, int cb_id, int buf_idx, int *buf_len, const char* str, size_t len, int hfield) {
+static int lhp_buffer(lhttp_parser* lparser, int cb_id, const char* str, size_t len, int hfield) {
     lua_State* L = (lua_State*)lparser->parser.data;
 
     assert(cb_id);
     assert(FLAG_HAS_CB(lparser->flags, cb_id));
-    assert(CB_ON_URL==cb_id ?
-           ST_URL_IDX    == buf_idx :
-           ST_BUFFER_IDX == buf_idx);
-    assert(CB_ON_URL==cb_id ?
-           &lparser->url_len == buf_len :
-           &lparser->buf_len == buf_len);
 
     /* insert event chunk into buffer. */
     FLAG_SET_BUF(lparser->flags, cb_id);
@@ -234,7 +197,7 @@ static int lhp_buffer(lhttp_parser* lparser, int cb_id, int buf_idx, int *buf_le
     }
 
     lua_pushlstring(L, str, len);
-    lua_rawseti(L, buf_idx, ++(*buf_len));
+    lua_rawseti(L, ST_BUFFER_IDX, ++(lparser->buf_len));
 
     return 0;
 }
@@ -255,10 +218,9 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
     return 0;
 }
 
-/* Flush the buffer and/or url as long as it is not the except_cb_id
- * being buffered.
+/* Flush the buffer as long as it is not the except_cb_id being buffered.
  */
-static int lhp_flush_except(lhttp_parser* lparser, int except_cb_id, int flush_url, int hfield) {
+static int lhp_flush_except(lhttp_parser* lparser, int except_cb_id, int hfield) {
     int flush = 0;
     int cb_id = FLAG_GET_BUF_CB_ID(lparser->flags);
 
@@ -272,48 +234,29 @@ static int lhp_flush_except(lhttp_parser* lparser, int except_cb_id, int flush_u
     }
 
     if ( flush ) {
-        int result = lhp_flush(lparser, cb_id, ST_BUFFER_IDX, &lparser->buf_len);
-        if ( 0 != result ) return result;
-    }
-
-    if ( flush_url && FLAG_HAS_BUF(lparser->flags, CB_ON_URL) ) {
-        int result = lhp_flush(lparser, CB_ON_URL, ST_URL_IDX, &lparser->url_len);
+        int result = lhp_flush(lparser, cb_id);
         if ( 0 != result ) return result;
     }
     return 0;
 }
 
-/* The event for cb_id where cb_id takes a string argument.  If
- * flush_url is true, then any buffered information in the URL_IDX
- * will be flushed.
+/* The event for cb_id where cb_id takes a string argument.
  */
-static int lhp_http_data_cb(http_parser* parser, int cb_id, const char* str, size_t len, int flush_url, int hfield) {
+static int lhp_http_data_cb(http_parser* parser, int cb_id, const char* str, size_t len, int hfield) {
     lhttp_parser* lparser = (lhttp_parser*)parser;
-    int  buf_idx;
-    int* buf_len;
 
-    if ( cb_id != CB_ON_URL ) {
-        int result = lhp_flush_except(lparser, cb_id, flush_url, hfield);
-        if ( 0 != result ) return result;
-    }
+    int result = lhp_flush_except(lparser, cb_id, hfield);
+    if ( 0 != result ) return result;
 
     if ( ! FLAG_HAS_CB(lparser->flags, cb_id) ) return 0;
 
-    if ( CB_ON_URL == cb_id ) {
-        buf_idx = ST_URL_IDX;
-        buf_len = &lparser->url_len;
-    } else {
-        buf_idx = ST_BUFFER_IDX;
-        buf_len = &lparser->buf_len;
-    }
-
-    return lhp_buffer(lparser, cb_id, buf_idx, buf_len, str, len, hfield);
+    return lhp_buffer(lparser, cb_id, str, len, hfield);
 }
 
-static int lhp_http_cb(http_parser* parser, int cb_id, int flush_url) {
+static int lhp_http_cb(http_parser* parser, int cb_id) {
     lhttp_parser* lparser = (lhttp_parser*)parser;
 
-    int result = lhp_flush_except(lparser, cb_id, flush_url, 0);
+    int result = lhp_flush_except(lparser, cb_id, 0);
     if ( 0 != result ) return result;
 
     if ( ! FLAG_HAS_CB(lparser->flags, cb_id) ) return 0;
@@ -322,35 +265,23 @@ static int lhp_http_cb(http_parser* parser, int cb_id, int flush_url) {
 }
 
 static int lhp_message_begin_cb(http_parser* parser) {
-    return lhp_http_cb(parser, CB_ON_MESSAGE_BEGIN, 0);
+    return lhp_http_cb(parser, CB_ON_MESSAGE_BEGIN);
 }
 
 static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_URL, str, len, 0, 0);
-}
-
-static int lhp_path_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_PATH, str, len, 0, 0);
-}
-
-static int lhp_query_string_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_QUERY_STRING, str, len, 0, 0);
-}
-
-static int lhp_fragment_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_FRAGMENT, str, len, 0, 0);
+    return lhp_http_data_cb(parser, CB_ON_URL, str, len, 0);
 }
 
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 1, 0);
+    return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 0);
 }
 
 static int lhp_header_value_cb(http_parser* parser, const char* str, size_t len) {
-    return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 0, 1);
+    return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 1);
 }
 
 static int lhp_headers_complete_cb(http_parser* parser) {
-    return lhp_http_cb(parser, CB_ON_HEADERS_COMPLETE, 1);
+    return lhp_http_cb(parser, CB_ON_HEADERS_COMPLETE);
 }
 
 static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
@@ -373,7 +304,7 @@ static int lhp_message_complete_cb(http_parser* parser) {
     int result = lhp_push_nil_event((lhttp_parser*)parser, CB_ON_BODY);
     if ( 0 != result ) return result;
 
-    return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE, 0);
+    return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE);
 }
 
 static int lhp_init(lua_State* L, enum http_parser_type type) {
@@ -388,7 +319,6 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
 
     lparser->flags   = 0;
     lparser->buf_len = 0;
-    lparser->url_len = 0;
 
     /* Get the metatable: */
     luaL_getmetatable(L, PARSER_MT);
@@ -410,12 +340,6 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
     /* Create buffer table and add it to the fenv table. */
     lua_createtable(L, 1, 0);
     lua_rawseti(L, -2, FENV_BUFFER_IDX);
-    /* if the on_url callback is registered, then create special buffer for url. */
-    if (FLAG_HAS_CB(lparser->flags, CB_ON_URL)) {
-        /* Create url buffer table and add it to the fenv table. */
-        lua_createtable(L, 1, 0);
-        lua_rawseti(L, -2, FENV_URL_IDX);
-    }
     /* Stack: callbacks, userdata, metatable, fenv */
     lua_setfenv(L, -3);
     /* Stack: callbacks, userdata, metatable */
@@ -444,10 +368,7 @@ static int lhp_execute(lua_State* L) {
 
     static const http_parser_settings settings = {
         .on_message_begin    = lhp_message_begin_cb,
-        .on_path             = lhp_path_cb,
-        .on_query_string     = lhp_query_string_cb,
         .on_url              = lhp_url_cb,
-        .on_fragment         = lhp_fragment_cb,
         .on_header_field     = lhp_header_field_cb,
         .on_header_value     = lhp_header_value_cb,
         .on_headers_complete = lhp_headers_complete_cb,
@@ -465,10 +386,6 @@ static int lhp_execute(lua_State* L) {
     lua_rawgeti(L, ST_FENV_IDX, FENV_BUFFER_IDX);
     assert(lua_istable(L, -1));
     assert(lua_gettop(L) == ST_BUFFER_IDX);
-
-    lua_rawgeti(L, ST_FENV_IDX, FENV_URL_IDX);
-    assert(lua_istable(L, -1) || !FLAG_HAS_CB(lparser->flags, CB_ON_URL));
-    assert(lua_gettop(L) == ST_URL_IDX);
 
     assert(lua_gettop(L) == ST_LEN);
     lua_pushnil(L);
@@ -538,6 +455,15 @@ static int lhp_status_code(lua_State* L) {
     return 1;
 }
 
+static int lhp_error(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    enum http_errno http_errno = lparser->parser.http_errno;
+    lua_pushnumber(L, http_errno);
+    lua_pushstring(L, http_errno_name(http_errno));
+    lua_pushstring(L, http_errno_description(http_errno));
+    return 3;
+}
+
 static int lhp_is_function(lua_State* L) {
     lua_pushboolean(L, lua_isfunction(L, 1));
     return 1;
@@ -597,6 +523,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushcfunction(L, lhp_status_code);
     lua_setfield(L, -2, "status_code");
+
+    lua_pushcfunction(L, lhp_error);
+    lua_setfield(L, -2, "error");
 
     lua_pushcfunction(L, lhp_should_keep_alive);
     lua_setfield(L, -2, "should_keep_alive");

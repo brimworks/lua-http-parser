@@ -43,6 +43,22 @@ end
 
 local lhp = require 'http.parser'
 
+local function parse_path_query_fragment(uri)
+    local path, query, fragment, off
+    -- parse path
+    path, off = uri:match('([^?]*)()')
+    -- parse query
+    if uri:sub(off, off) == '?' then
+        query, off = uri:match('([^#]*)()', off + 1)
+    end
+    -- parse fragment
+    if uri:sub(off, off) == '#' then
+        fragment = uri:sub(off + 1)
+        off = #uri
+    end
+    return path or '/', query, fragment
+end
+
 local expects = {}
 local requests = {}
 
@@ -117,13 +133,10 @@ local function init_parser()
         cur = { headers = {} }
     end
 
-    local fields = { "path", "query_string", "fragment", "url" }
-    for _, field in ipairs(fields) do
-        cb["on_" .. field] =
-            function(value)
-                assert(cur[field] == nil, "["..tostring(field).."]=["..tostring(cur[field]).."] .. [" .. tostring(value) .. "]")
-                cur[field] = value;
-            end
+    function cb.on_url(value)
+        assert(cur.url == nil, "[url]=["..tostring(cur.url).."] .. [" .. tostring(value) .. "]")
+        cur.url = value
+        cur.path, cur.query_string, cur.fragment = parse_path_query_fragment(value)
     end
 
     function cb.on_body(value)
@@ -154,7 +167,6 @@ end
 local null_cbs = {
     on_message_begin = null_cb,
     "message_begin",
-    on_path = null_cb, on_query_string = null_cb, on_fragment = null_cb,
     on_url = null_cb,
     on_header = null_cb,
     on_headers_complete = null_cb,
