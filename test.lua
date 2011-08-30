@@ -20,6 +20,22 @@ function ok(assert_true, desc)
     counter = counter + 1
 end
 
+local function parse_path_query_fragment(uri)
+    local path, query, fragment, off
+    -- parse path
+    path, off = uri:match('([^?]*)()')
+    -- parse query
+    if uri:sub(off, off) == '?' then
+        query, off = uri:match('([^#]*)()', off + 1)
+    end
+    -- parse fragment
+    if uri:sub(off, off) == '#' then
+        fragment = uri:sub(off + 1)
+        off = #uri
+    end
+    return path or '/', query, fragment
+end
+
 local pipeline = [[
 GET / HTTP/1.1
 Host: localhost
@@ -281,19 +297,6 @@ function buffer_tests()
     local cb_cnt = 0
     local cb_val
 
-    function cb.on_path(value)
-        cb_cnt = cb_cnt + 1
-        cb_val = value
-    end
-
-    local req = lhp.request(cb)
-
-    req:execute("GET /pa")
-    req:execute("th?qs")
-
-    ok(cb_cnt == 1, "on_path flushed?")
-    ok(cb_val == "/path", "on_path buffered")
-
     cb = {}
     cb_cnt = 0
     cb_val = nil
@@ -322,13 +325,11 @@ function init_parser()
        cur = { headers = {} }
    end
 
-   local fields = { "path", "query_string", "fragment", "url" }
-   for _, field in ipairs(fields) do
-       cb["on_" .. field] =
-           function(value)
-               ok(cur[field] == nil, "expected ["..tostring(field).."]=nil, but got ["..tostring(cur[field]).."] when setting field [" .. tostring(value) .. "]")
-               cur[field] = value;
-           end
+   function cb.on_url(value)
+       ok(cur.url == nil, "expected [url]=nil, but got ["..tostring(cur.url)..
+           "] when setting field [" .. tostring(value) .. "]")
+       cur.url = value;
+       cur.path, cur.query_string, cur.fragment = parse_path_query_fragment(value)
    end
 
    function cb.on_body(value)
