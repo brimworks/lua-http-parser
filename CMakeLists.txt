@@ -23,7 +23,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/http-parser/http_parser.c")
                         COMMAND git submodule update)
     else()
         execute_process(WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        COMMAND git clone "git://github.com/ry/http-parser.git")
+                        COMMAND git clone "git://github.com/joyent/http-parser.git")
     endif()
 endif()
 
