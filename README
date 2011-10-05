@@ -25,8 +25,8 @@
 * THE SOFTWARE.
 **********************************************************************
 
-To use this library, you need ry's http-parser, get it here:
-    git clone git://github.com/ry/http-parser.git
+To use this library, you need joyent's http-parser, get it here:
+    git clone git://github.com/joyent/http-parser.git
 
 To build this library, you need luarocks, get it here:
     http://www.luarocks.org/en/Download
