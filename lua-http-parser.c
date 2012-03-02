@@ -64,7 +64,7 @@ static const char *lhp_callback_names[] = {
 #define FLAG_HAS_BUF(flags, cb_id) ( FLAG_GET_BUF_CB_ID(flags) == cb_id )
 #define FLAG_SET_BUF(flags, cb_id) ( (flags) = (((flags) & ~FLAGS_BUF_CB_ID_MASK) \
   | ((cb_id) & FLAGS_BUF_CB_ID_MASK)) )
-#define FLAG_RM_BUF(flags, cb_id)  ( (flags) &= ~FLAGS_BUF_CB_ID_MASK )
+#define FLAG_RM_BUF(flags)  ( (flags) &= ~FLAGS_BUF_CB_ID_MASK )
 
 #define FLAG_HAS_HFIELD(flags)     ( ((flags) & FLAGS_CB_ID_FIRST_BIT) >> FLAGS_BUF_CB_ID_BITS )
 #define FLAG_SET_HFIELD(flags)     ( (flags) |= FLAGS_CB_ID_FIRST_BIT )
@@ -111,6 +111,19 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
     return 0;
 }
 
+/* Clear all elements in the table at idx starting at
+ * element begin and going to length len.
+ */
+static int lhp_table_clear(lua_State *L, int idx, int begin, int len) {
+    /* nil all elements. */
+    for(; begin <= len; begin++) {
+        /* remove element from table. */
+        lua_pushnil(L);
+        lua_rawseti(L, idx, begin);
+    }
+    return 0;
+}
+
 /* "Flush" the buffer for the callback identified by cb_id.  The
  * CB_ON_HEADER cb_id is flushed by inspecting FLAG_HAS_HFIELD().
  * If that bit is not set, then the buffer is concatinated into
@@ -142,7 +155,7 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id) {
     begin = 1;
     top   = lua_gettop(L);
 
-    FLAG_RM_BUF(lparser->flags, cb_id);
+    FLAG_RM_BUF(lparser->flags);
     if ( CB_ON_HEADER == cb_id ) {
         if ( FLAG_HAS_HFIELD(lparser->flags) ) {
             /* Push <func>, <arg1>[, <arg2>] */
@@ -464,6 +477,28 @@ static int lhp_error(lua_State* L) {
     return 3;
 }
 
+static int lhp_reset(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    http_parser*  parser = &(lparser->parser);
+
+    /* truncate stack to (userdata) */
+    lua_settop(L, 1);
+
+    /* re-initialize http-parser. */
+    http_parser_init(parser, parser->type);
+
+    /* clear buffer */
+    lua_getfenv(L, 1);
+    lua_rawgeti(L, 2, FENV_BUFFER_IDX);
+    lhp_table_clear(L, 3, 1, lparser->buf_len);
+
+    /* reset buffer length and flags. */
+    lparser->buf_len = 0;
+    FLAG_RM_BUF(lparser->flags);
+    FLAG_RM_HFIELD(lparser->flags);
+    return 0;
+}
+
 static int lhp_is_function(lua_State* L) {
     lua_pushboolean(L, lua_isfunction(L, 1));
     return 1;
@@ -531,6 +566,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lhp_push_execute_fn(L);
     lua_setfield(L, -2, "execute");
+
+    lua_pushcfunction(L, lhp_reset);
+    lua_setfield(L, -2, "reset");
 
     lua_pop(L, 1);
 

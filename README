@@ -125,6 +125,10 @@ API:
 
         Returns errno(number), error name(string), error description(string).
 
+    parser:reset()
+
+        Re-initialize HTTP parser clearing any previous error/state.
+
     parser:status_code()
 
         Returns the HTTP status code of a response.  This is only valid

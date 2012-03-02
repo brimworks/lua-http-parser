@@ -239,6 +239,7 @@ local function apply_client(N, client, parser, requests)
     for i=1,N do
         for x=1,#requests do
             client(parser, requests[x])
+            parser:reset()
         end
     end
 end
