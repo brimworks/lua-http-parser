@@ -5,6 +5,8 @@ local clock = os.clock
 local quiet = false
 local disable_gc = true
 
+local N=100000
+
 if arg[1] == '-gc' then
     disable_gc = false
     table.remove(arg,1)
@@ -39,6 +41,7 @@ local function bench(name, N, func, ...)
     local diff1 = (clock() - start1)
     local diff2 = (time() - start2)
     printf("total time: %10.6f (%10.6f) seconds", diff1, diff2)
+    return diff1, diff2
 end
 
 local lhp = require 'http.parser'
@@ -68,6 +71,7 @@ requests.ab = {
 }
 
 expects.ab = {
+    method = "GET",
     url = "/foo/t.html?qstring#frag",
     path = "/foo/t.html",
     query_string = "qstring",
@@ -89,6 +93,7 @@ requests.no_buff_body = {
 }
 
 expects.no_buff_body = {
+    method = "GET",
     body = "chunk1chunk2"
 }
 
@@ -97,6 +102,7 @@ requests.httperf = {
 }
 
 expects.httperf = {
+    method = "GET",
     url = "/",
     path = "/",
     headers = {
@@ -110,6 +116,7 @@ requests.firefox = {
 }
 
 expects.firefox = {
+    method = "GET",
     url = "/",
     path = "/",
     headers = {
@@ -123,10 +130,18 @@ expects.firefox = {
     }
 }
 
+local names_list = {}
+local data_list = {}
+for name, data in pairs(requests) do
+    names_list[#names_list + 1] = name
+    data_list[#data_list + 1] = data
+end
+
 local function init_parser()
     local reqs         = {}
     local cur          = nil
     local cb           = {}
+    local parser
 
     function cb.on_message_begin()
         assert(cur == nil)
@@ -153,20 +168,24 @@ local function init_parser()
         cur.headers[field] = value
     end
 
+    function cb.on_headers_complete()
+        cur.method = parser:method()
+    end
+
     function cb.on_message_complete()
         assert(nil ~= cur)
         table.insert(reqs, cur)
         cur = nil
     end
 
-    return lhp.request(cb), reqs
+    parser = lhp.request(cb)
+    return parser, reqs
 end
 
 local function null_cb()
 end
 local null_cbs = {
     on_message_begin = null_cb,
-    "message_begin",
     on_url = null_cb,
     on_header = null_cb,
     on_headers_complete = null_cb,
@@ -190,29 +209,36 @@ local function assert_deeply(got, expect, context)
 end
 
 local function good_client(parser, data)
-    for _, line in ipairs(data) do
+    for i=1,#data do
+        local line = data[i]
         local bytes_read = parser:execute(line)
-        assert(bytes_read == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+        if bytes_read ~= #line then
+          error("only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+        end
     end
 end
 
 local function bad_client(parser, data)
-    for _, line in ipairs(data) do
+    for i=1,#data do
+        local line = data[i]
         local total = 0
         for i=1,#line do
             local bytes_read = parser:execute(line:sub(i,i))
-            assert(1 == bytes_read, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+            if 1 ~= bytes_read then
+              error("only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+            end
             total = total + 1
         end
-        assert(total == #line, "only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+        if total ~= #line then
+          error("only ["..tostring(bytes_read).."] bytes read, expected ["..tostring(#line).."]")
+        end
    end
 end
 
 local function apply_client(N, client, parser, requests)
     for i=1,N do
-        for name, data in pairs(requests) do
-            client(parser, data)
-            assert(parser:method() == "GET", "Method is GET")
+        for x=1,#requests do
+            client(parser, requests[x])
         end
     end
 end
@@ -225,7 +251,7 @@ local function apply_client_memtest(name, client)
     start_mem = (collectgarbage"count" * 1024)
     --print(name, 'start memory size: ', start_mem)
     if disable_gc then collectgarbage"stop" end
-    apply_client(1, client, parser, requests)
+    apply_client(1, client, parser, data_list)
     end_mem = (collectgarbage"count" * 1024)
     --print(name, 'end   memory size: ', end_mem)
     print(name, 'total memory used: ', (end_mem - start_mem))
@@ -254,8 +280,10 @@ local function apply_client_speedtest(name, client)
     start_mem = (collectgarbage"count" * 1024)
     --print(name, 'start memory size: ', start_mem)
     if disable_gc then collectgarbage"stop" end
-    bench(name, 10000, apply_client, client, parser, requests)
+    local diff1, diff2 = bench(name, N, apply_client, client, parser, data_list)
     end_mem = (collectgarbage"count" * 1024)
+    local total = N * #data_list
+    printf("units/sec: %10.6f (%10.6f) units/sec", total/diff1, total/diff2)
     --print(name, 'end   memory size: ', end_mem)
     print(name, 'total memory used: ', (end_mem - start_mem))
     print()
@@ -304,6 +332,6 @@ for name,client in pairs(clients) do
 end
 
 print('overhead test')
-per_parser_overhead(1000)
+per_parser_overhead(N)
 
 
