@@ -473,7 +473,6 @@ static int lhp_is_function(lua_State* L) {
  * can yield without having to apply the CoCo patch to Lua. */
 static const char* lhp_execute_lua =
     "local c_execute, is_function = ...\n"
-    "local type = type\n"
     "local function execute(result, cb, arg1, arg2, ...)\n"
     "    if ( not cb ) then\n"
     "        return result\n"
