@@ -4,8 +4,10 @@ local time = socket.gettime
 local clock = os.clock
 local quiet = false
 local disable_gc = true
+local type = type
+local tconcat = table.concat
 
-local N=100000
+local N=tonumber(arg[1]) or 10000
 
 if arg[1] == '-gc' then
     disable_gc = false
@@ -137,34 +139,30 @@ for name, data in pairs(requests) do
     data_list[#data_list + 1] = data
 end
 
-local function init_parser()
-    local reqs         = {}
+local function init_parser(reqs)
     local cur          = nil
-    local cb           = {}
     local parser
 
+    local cb           = {}
     function cb.on_message_begin()
         assert(cur == nil)
         cur = { headers = {} }
     end
 
     function cb.on_url(value)
-        assert(cur.url == nil, "[url]=["..tostring(cur.url).."] .. [" .. tostring(value) .. "]")
         cur.url = value
         cur.path, cur.query_string, cur.fragment = parse_path_query_fragment(value)
     end
 
     function cb.on_body(value)
-        if ( nil == cur.body ) then
-            cur.body = ''
-        end
-        if nil ~= value then
+        if not cur.body then
+            cur.body = value
+        elseif nil ~= value then
             cur.body = cur.body .. value
         end
     end
 
     function cb.on_header(field, value)
-        assert(cur.headers[field] == nil)
         cur.headers[field] = value
     end
 
@@ -174,12 +172,12 @@ local function init_parser()
 
     function cb.on_message_complete()
         assert(nil ~= cur)
-        table.insert(reqs, cur)
+        if reqs then table.insert(reqs, cur) end
         cur = nil
     end
 
     parser = lhp.request(cb)
-    return parser, reqs
+    return parser
 end
 
 local function null_cb()
@@ -244,18 +242,19 @@ local function apply_client(N, client, parser, requests)
     end
 end
 
-local function apply_client_memtest(name, client)
+local function apply_client_memtest(name, client, N)
     local start_mem, end_mem
     
-    local parser, reqs = init_parser()
+    local reqs = {}
+    local parser = init_parser(reqs)
     full_gc()
     start_mem = (collectgarbage"count" * 1024)
     --print(name, 'start memory size: ', start_mem)
     if disable_gc then collectgarbage"stop" end
-    apply_client(1, client, parser, data_list)
+    apply_client(N, client, parser, data_list)
     end_mem = (collectgarbage"count" * 1024)
     --print(name, 'end   memory size: ', end_mem)
-    print(name, 'total memory used: ', (end_mem - start_mem))
+    print(name, 'N=', N, 'total memory used: ', (end_mem - start_mem))
     print()
    
     -- validate parsed request data.
@@ -273,10 +272,10 @@ local function apply_client_memtest(name, client)
     full_gc()
 end
 
-local function apply_client_speedtest(name, client)
+local function apply_client_speedtest(name, client, N)
     local start_mem, end_mem
  
-    local parser = init_null_parser()
+    local parser = init_parser()
     full_gc()
     start_mem = (collectgarbage"count" * 1024)
     --print(name, 'start memory size: ', start_mem)
@@ -286,7 +285,7 @@ local function apply_client_speedtest(name, client)
     local total = N * #data_list
     printf("units/sec: %10.6f (%10.6f) units/sec", total/diff1, total/diff2)
     --print(name, 'end   memory size: ', end_mem)
-    print(name, 'total memory used: ', (end_mem - start_mem))
+    print(name, 'N=', N, 'total memory used: ', (end_mem - start_mem))
     print()
    
     parser = nil
@@ -318,18 +317,18 @@ local function per_parser_overhead(N)
 end
 
 local clients = {
-    good = good_client,
-    bad = bad_client,
+    good = { cb = good_client, mem_N=1, speed_N=N*10},
+    bad = { cb = bad_client, mem_N=1, speed_N=N},
 }
 
 print('memory test')
 for name,client in pairs(clients) do
-    apply_client_memtest(name, client)
+    apply_client_memtest(name, client.cb, client.mem_N)
 end
 
 print('speed test')
 for name,client in pairs(clients) do
-    apply_client_speedtest(name, client)
+    apply_client_speedtest(name, client.cb, client.speed_N)
 end
 
 print('overhead test')
