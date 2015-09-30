@@ -19,20 +19,26 @@
  */
 #define CB_ON_MESSAGE_BEGIN      1
 #define CB_ON_URL                2
-#define CB_ON_HEADER             3
-#define CB_ON_HEADERS_COMPLETE   4
-#define CB_ON_BODY               5
-#define CB_ON_MESSAGE_COMPLETE   6
+#define CB_ON_STATUS             3
+#define CB_ON_HEADER             4
+#define CB_ON_HEADERS_COMPLETE   5
+#define CB_ON_BODY               6
+#define CB_ON_MESSAGE_COMPLETE   7
+#define CB_ON_CHUNK_HEADER       8
+#define CB_ON_CHUNK_COMPLETE     9
 #define CB_LEN                   (sizeof(lhp_callback_names)/sizeof(*lhp_callback_names))
 
 static const char *lhp_callback_names[] = {
     /* The MUST be in the same order as the above callbacks */
     "on_message_begin",
     "on_url",
+    "on_status",
     "on_header",
     "on_headers_complete",
     "on_body",
     "on_message_complete",
+    "on_chunk_header",
+    "on_chunk_complete",
 };
 
 /* Non-callback FENV indices. */
@@ -285,6 +291,10 @@ static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
     return lhp_http_data_cb(parser, CB_ON_URL, str, len, 0);
 }
 
+static int lhp_status_cb(http_parser* parser, const char* str, size_t len) {
+    return lhp_http_data_cb(parser, CB_ON_STATUS, str, len, 0);
+}
+
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
     return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 0);
 }
@@ -320,13 +330,23 @@ static int lhp_message_complete_cb(http_parser* parser) {
     return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE);
 }
 
+static int lhp_chunk_header_cb(http_parser* parser) {
+    return lhp_http_cb(parser, CB_ON_CHUNK_HEADER);
+}
+
+static int lhp_chunk_complete_cb(http_parser* parser) {
+    return lhp_http_cb(parser, CB_ON_CHUNK_COMPLETE);
+}
+
 static int lhp_init(lua_State* L, enum http_parser_type type) {
     int cb_id;
-    luaL_checktype(L, 1, LUA_TTABLE);
     /* Stack: callbacks */
 
-    lhttp_parser* lparser = (lhttp_parser*)lua_newuserdata(L, sizeof(lhttp_parser));
-    http_parser* parser = &(lparser->parser);
+    lhttp_parser* lparser;
+    http_parser* parser;
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lparser = (lhttp_parser*)lua_newuserdata(L, sizeof(lhttp_parser));
+    parser = &(lparser->parser);
     assert(NULL != parser);
     /* Stack: callbacks, userdata */
 
@@ -380,13 +400,16 @@ static int lhp_execute(lua_State* L) {
     const char*   str = luaL_checklstring(L, 2, &len);
 
     static const http_parser_settings settings = {
-        .on_message_begin    = lhp_message_begin_cb,
-        .on_url              = lhp_url_cb,
-        .on_header_field     = lhp_header_field_cb,
-        .on_header_value     = lhp_header_value_cb,
-        .on_headers_complete = lhp_headers_complete_cb,
-        .on_body             = lhp_body_cb,
-        .on_message_complete = lhp_message_complete_cb
+        lhp_message_begin_cb,
+        lhp_url_cb,
+        lhp_status_cb,
+        lhp_header_field_cb,
+        lhp_header_value_cb,
+        lhp_headers_complete_cb,
+        lhp_body_cb,
+        lhp_message_complete_cb,
+        lhp_chunk_header_cb,
+        lhp_chunk_complete_cb
     };
 
     /* truncate stack to (userdata, string) */
