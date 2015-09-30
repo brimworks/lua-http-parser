@@ -3,6 +3,11 @@
 #include <lua.h>
 #include "http-parser/http_parser.h"
 
+#if LUA_VERSION_NUM >= 502
+#define lua_setfenv         lua_setuservalue
+#define lua_getfenv         lua_getuservalue
+#endif
+
 #define PARSER_MT "http.parser{parser}"
 
 #define check_parser(L, narg)                                   \
