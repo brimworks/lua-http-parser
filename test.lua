@@ -9,9 +9,11 @@ end
 
 local lhp = require 'http.parser'
 
-local counter = 1
+local counter, failure = 1, 0
 
 function ok(assert_true, desc)
+    if not assert_true then failure = failure + 1 end
+
     local msg = ( assert_true and "ok " or "not ok " ) .. counter
     if ( desc ) then
         msg = msg .. " - " .. desc
@@ -174,7 +176,7 @@ function max_events_test()
         "GET / HTTP/1.1\r\n",
     }
     -- Generate enough events to trigger a "stack overflow"
-    local header_cnt = 3000
+    local header_cnt = 6000
     for i=1, header_cnt do
         input_tbl[#input_tbl+1] = "a:\r\n"
     end
@@ -201,6 +203,22 @@ function max_events_test()
 
     ok(0 == result, "Parser can not continue after stack overflow ["
        .. tostring(result) .. "]")
+end
+
+function regression_no_body_cb_test()
+    -- The goal of this test is to generate the most possible events
+    local input_tbl = {
+        "GET / HTTP/1.1\r\n",
+        "Header: value\r\n",
+        "\r\n",
+    }
+
+    local parser = lhp.request{}
+
+    local input = table.concat(input_tbl)
+
+    local result = parser:execute(input)
+    ok(result == #input, 'can work without on_body callback')
 end
 
 function basic_tests()
@@ -394,5 +412,7 @@ nil_body_test()
 pipeline_test()
 please_continue_test()
 connection_close_test()
+regression_no_body_cb_test()
 
-print("1.." .. counter)
+print("1.." .. counter-1)
+if failure > 0 then os.exit(-1) end

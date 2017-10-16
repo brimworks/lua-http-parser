@@ -109,6 +109,7 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
         lua_rawseti(L, idx, begin);
         return 0;
     }
+
     /* do a table concat. */
     luaL_buffinit(L, &buff);
     for(; begin <= len; begin++) {
@@ -186,7 +187,7 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id) {
             lparser->buf_len = 1;
         }
     } else {
-        /* Push <func>[, <arg1> */
+        /* Push <func>[, <arg1>] */
         lua_rawgeti(L, ST_FENV_IDX, cb_id);
 
         begin    = 1;
@@ -329,8 +330,11 @@ static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
 
 static int lhp_message_complete_cb(http_parser* parser) {
     /* Send on_body(nil) message to comply with LTN12 */
-    int result = lhp_push_nil_event((lhttp_parser*)parser, CB_ON_BODY);
-    if ( 0 != result ) return result;
+    lhttp_parser* lparser = (lhttp_parser*)parser;
+    if( FLAG_HAS_CB(lparser->flags, CB_ON_BODY) ) {
+      int result = lhp_push_nil_event((lhttp_parser*)parser, CB_ON_BODY);
+      if ( 0 != result ) return result;
+    }
 
     return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE);
 }
@@ -459,6 +463,12 @@ static int lhp_is_upgrade(lua_State* L) {
     return 1;
 }
 
+static int lhp__tostring(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    lua_pushfstring(L, PARSER_MT" %p", lparser);
+    return 1;
+}
+
 static int lhp_method(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     switch(lparser->parser.method) {
@@ -576,6 +586,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
 
     lua_pushcfunction(L, lhp_is_upgrade);
     lua_setfield(L, -2, "is_upgrade");
+
+    lua_pushcfunction(L, lhp__tostring);
+    lua_setfield(L, -2, "__tostring");
 
     lua_pushcfunction(L, lhp_method);
     lua_setfield(L, -2, "method");
