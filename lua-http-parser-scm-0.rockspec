@@ -12,13 +12,16 @@ description = {
     license  = 'MIT', --as with Ryan's
 }
 dependencies = {
-    'lua >= 5.1'
+    'lua >= 5.1, < 5.4'
 }
 build = {
-    type = 'cmake',
-    variables = {
-        INSTALL_CMOD      = "$(LIBDIR)",
-        CMAKE_BUILD_TYPE  = "$(CMAKE_BUILD_TYPE)",
-        ["CFLAGS:STRING"] = "$(CFLAGS)",
-    },
+    type = 'builtin',
+    modules = {
+        ['http.parser'] = {
+            sources = {
+                "http-parser/http_parser.c",
+                "lua-http-parser.c"
+            }
+        }
+    }
 }

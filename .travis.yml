@@ -1,0 +1,43 @@
+language: c
+
+sudo: false
+
+matrix:
+  include:
+    - env: LUA="lua 5.1"
+      os: osx
+    - env: LUA="lua 5.1"
+      os: linux
+    - env: LUA="lua 5.2"
+      os: linux
+    - env: LUA="lua 5.3"
+      os: linux
+    - env: LUA="luajit 2.0"
+      os: linux
+    - env: LUA="luajit 2.1"
+      os: linux
+
+cache:
+  directories:
+    - here
+    - $HOME/.cache/pip 
+
+before_install:
+  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then export PATH=$PATH:~/Library/Python/2.7/bin/; fi
+  - pip install --user hererocks
+  - hererocks here -r^ --$LUA
+  - source here/bin/activate
+
+install:
+  - luarocks make lua-http-parser-scm-0.rockspec
+
+before_script:
+  - luarocks show luacov-coveralls > /dev/null 2>&1 || luarocks install luacov-coveralls
+
+script:
+  - lua test.lua
+  - lua bench.lua
+
+before_cache:
+  - luarocks remove lua-http-parser
+  - rm -f /home/travis/.cache/pip/log/debug.log

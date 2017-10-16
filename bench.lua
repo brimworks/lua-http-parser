@@ -7,8 +7,6 @@ local disable_gc = true
 local type = type
 local tconcat = table.concat
 
-local N=tonumber(arg[1]) or 10000
-
 if arg[1] == '-gc' then
     disable_gc = false
     table.remove(arg,1)
@@ -16,6 +14,8 @@ else
     print"GC is disabled so we can track memory usage better"
     print""
 end
+
+local N=tonumber(arg[1]) or 10000
 
 local function printf(fmt, ...)
     local res

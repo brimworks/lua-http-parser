@@ -58,10 +58,14 @@ API:
         on_header       = function(hkey, hval) ... end
         on_body         = function(body) ... end
 
-        on_message_begin    = function() ... end
-        on_message_complete = function() ... end
-        on_headers_complete = function() ... end
+        on_chunk_header   = function() ... end,
+        on_chunk_complete = function() ... end,
+
+        on_message_begin    = function() ... end,
+        on_message_complete = function() ... end,
+        on_headers_complete = function() ... end,
     }
+
     parser = lhp.response { ... }
 
         Create a new HTTP parser to handle either an HTTP request or
