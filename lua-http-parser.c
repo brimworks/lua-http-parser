@@ -189,7 +189,9 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id) {
     } else {
         /* Push <func>[, <arg1>] */
         lua_rawgeti(L, ST_FENV_IDX, cb_id);
-
+        if (CB_ON_STATUS == cb_id){
+            lua_pushinteger(L, lparser->parser.status_code);
+        }
         begin    = 1;
         save     = 0;
         lparser->buf_len = 0;
@@ -238,7 +240,12 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
     if ( ! lua_checkstack(L, 5) ) return -1;
 
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
-    lua_pushnil(L);
+    if(cb_id == CB_ON_CHUNK_HEADER){
+      lua_pushinteger(L, lparser->parser.content_length);
+    }
+    else{
+      lua_pushnil(L);
+    }
 
     return 0;
 }
@@ -397,6 +404,7 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
 static int lhp_request(lua_State* L) {
     return lhp_init(L, HTTP_REQUEST);
 }
+
 static int lhp_response(lua_State* L) {
     return lhp_init(L, HTTP_RESPONSE);
 }

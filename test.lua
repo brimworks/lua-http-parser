@@ -73,6 +73,40 @@ function pipeline_test()
     ok(#body == 0)
 end
 
+function status_code_test()
+    local response = { "HTTP/1.1 404 Not found", "", ""}
+    local code, text
+    local parser = lhp.response{
+        on_status = function(a, b) code, text = a, b end
+    }
+    parser:execute(table.concat(response, '\r\n'))
+    ok(code == 404, 'Expected status code: 404, got ' .. tostring(code))
+    ok(text == 'Not found', 'Expected status text: `Not found`, got `' .. tostring(text) .. '`')
+end
+
+function chunk_header_test()
+    local response = {
+        "HTTP/1.1 200 OK";
+        "Transfer-Encoding: chunked";
+        "";
+        "";
+    }
+    local content_length
+    local parser = lhp.response{
+        on_chunk_header = function(a) content_length = a end
+    }
+
+    parser:execute(table.concat(response, '\r\n'))
+
+    content_length = nil
+    parser:execute("23\r\n")
+    ok(content_length == 0x23, "first chunk Content-Length expected: 0x23, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+    parser:execute("This is the data in the first chunk\r\n")
+
+    content_length = nil
+    parser:execute("1A\r\n")
+    ok(content_length == 0x1A, "first chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+end
 
 -- NOTE: http-parser fails if the first response is HTTP 1.0:
 -- HTTP/1.0 100 Please continue mate.
@@ -420,6 +454,8 @@ pipeline_test()
 please_continue_test()
 connection_close_test()
 regression_no_body_cb_test()
+status_code_test()
+chunk_header_test()
 
 print("1.." .. counter-1)
 if failure > 0 then os.exit(-1) end
