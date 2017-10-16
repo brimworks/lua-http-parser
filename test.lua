@@ -23,19 +23,8 @@ function ok(assert_true, desc)
 end
 
 local function parse_path_query_fragment(uri)
-    local path, query, fragment, off
-    -- parse path
-    path, off = uri:match('([^?]*)()')
-    -- parse query
-    if uri:sub(off, off) == '?' then
-        query, off = uri:match('([^#]*)()', off + 1)
-    end
-    -- parse fragment
-    if uri:sub(off, off) == '#' then
-        fragment = uri:sub(off + 1)
-        off = #uri
-    end
-    return path or '/', query, fragment
+    local url = lhp.parse_url(uri, true)
+    return url.path, url.query, url.fragment
 end
 
 local pipeline = [[
@@ -73,6 +62,34 @@ function pipeline_test()
     ok(#body == 0)
 end
 
+function parse_url_test()
+
+    local tast_cases = {
+        {"http://hello.com:8080/some/path?with=1%23&args=value", false,
+            {
+                schema='http',
+                host='hello.com',
+                port=8080,
+                path='/some/path',
+                query='with=1%23&args=value',
+            },
+        },
+        {"/foo/t.html?qstring#frag", true,
+            {
+                path='/foo/t.html',
+                query='qstring',
+                fragment='frag',
+            },
+        },
+    }
+
+    for _, tast_case in ipairs(tast_cases) do
+        local url, is_connect, expect = tast_case[1], tast_case[2], tast_case[3]
+        local result = lhp.parse_url(url, is_connect)
+        is_deeply(result, expect, 'Url: ' .. url)
+    end
+end
+
 function status_code_test()
     local response = { "HTTP/1.1 404 Not found", "", ""}
     local code, text
@@ -105,7 +122,7 @@ function chunk_header_test()
 
     content_length = nil
     parser:execute("1A\r\n")
-    ok(content_length == 0x1A, "first chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+    ok(content_length == 0x1A, "second chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
 end
 
 -- NOTE: http-parser fails if the first response is HTTP 1.0:
@@ -456,6 +473,7 @@ connection_close_test()
 regression_no_body_cb_test()
 status_code_test()
 chunk_header_test()
+parse_url_test()
 
 print("1.." .. counter-1)
 if failure > 0 then os.exit(-1) end

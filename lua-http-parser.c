@@ -521,10 +521,45 @@ static int lhp_status_code(lua_State* L) {
 static int lhp_error(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     enum http_errno http_errno = lparser->parser.http_errno;
-    lua_pushnumber(L, http_errno);
+    lua_pushinteger(L, http_errno);
     lua_pushstring(L, http_errno_name(http_errno));
     lua_pushstring(L, http_errno_description(http_errno));
     return 3;
+}
+
+static int lhp_parse_url(lua_State* L){
+
+#define SET_UF_FIELD(id, name) \
+    if(url.field_set & (1 << id)){ \
+      lua_pushlstring(L, u + url.field_data[id].off, url.field_data[id].len); \
+      lua_setfield(L, -2, name); \
+    }
+
+    size_t len; const char *u = luaL_checklstring(L, 1, &len);
+    int is_connect = lua_toboolean(L, 2);
+    struct http_parser_url url;
+    int result = http_parser_parse_url(u, len, is_connect, &url);
+    if (result != 0) {
+      lua_pushnil(L);
+      lua_pushinteger(L, result);
+    }
+
+    lua_newtable(L);
+
+    if(url.field_set & (1 << UF_PORT)){
+      lua_pushinteger(L, url.port);
+      lua_setfield(L, -2, "port");
+    }
+
+    SET_UF_FIELD(UF_SCHEMA,   "schema"  );
+    SET_UF_FIELD(UF_HOST,     "host"    );
+    SET_UF_FIELD(UF_PATH,     "path"    );
+    SET_UF_FIELD(UF_QUERY,    "query"   );
+    SET_UF_FIELD(UF_FRAGMENT, "fragment");
+    SET_UF_FIELD(UF_USERINFO, "userinfo");
+
+    return 1;
+#undef SET_UF_FIELD
 }
 
 static int lhp_reset(lua_State* L) {
@@ -634,5 +669,8 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_pushcfunction(L, lhp_response);
     lua_setfield(L, -2, "response");
 
+    lua_pushcfunction(L, lhp_parse_url);
+    lua_setfield(L, -2, "parse_url");
+    
     return 1;
 }
