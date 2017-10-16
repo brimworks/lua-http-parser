@@ -33,6 +33,7 @@ install:
 
 before_script:
   - luarocks show luacov-coveralls > /dev/null 2>&1 || luarocks install luacov-coveralls
+  - luarocks show luasocket        > /dev/null 2>&1 || luarocks install luasocket
 
 script:
   - lua test.lua

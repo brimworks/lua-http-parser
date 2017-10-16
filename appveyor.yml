@@ -61,6 +61,7 @@ build_script:
 before_test:
   # test deps
   - luarocks show luacov-coveralls > /dev/null 2>&1 || luarocks install luacov-coveralls
+  - luarocks show luasocket        > /dev/null 2>&1 || luarocks install luasocket
 
 test_script:
   - lua test.lua
