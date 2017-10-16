@@ -192,19 +192,18 @@ function max_events_test(N)
 
     local parser = lhp.request(cbs)
     local input = table.concat(input_tbl)
+    local result = parser:execute(input)
 
     N = N * 2
     if (#input == result) and ( N < 100000 ) then
         return max_events_test(N)
     end
 
-    local result = parser:execute(input)
-
     input = input:sub(result + 1)
 
     -- We should have generated a stack overflow event that should be
     -- handled gracefully... note that
-    ok(#input > result,
+    ok(#input < result,
        "Expect " .. header_cnt .. " field events, got " .. field_cnt)
 
     result = parser:execute(input)
