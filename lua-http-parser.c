@@ -443,7 +443,11 @@ static int lhp_execute(lua_State* L) {
     parser->data = NULL;
 
     /* replace nil place-holder with 'result' code. */
+#if LUA_VERSION_NUM > 502
+    lua_pushinteger(L, result);
+#else
     lua_pushnumber(L, result);
+#endif
     lua_replace(L, ST_LEN+1);
     /* Transform the stack into a table: */
     len = lua_gettop(L) - ST_LEN;

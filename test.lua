@@ -170,16 +170,19 @@ function nil_body_test()
     ok(#body == 2)
 end
 
-function max_events_test()
+function max_events_test(N)
+    N = N or 3000
+
     -- The goal of this test is to generate the most possible events
     local input_tbl = {
         "GET / HTTP/1.1\r\n",
     }
     -- Generate enough events to trigger a "stack overflow"
-    local header_cnt = 6000
+    local header_cnt = N
     for i=1, header_cnt do
         input_tbl[#input_tbl+1] = "a:\r\n"
     end
+    input_tbl[#input_tbl+1] = "\r\n"
 
     local cbs = {}
     local field_cnt = 0
@@ -190,13 +193,18 @@ function max_events_test()
     local parser = lhp.request(cbs)
     local input = table.concat(input_tbl)
 
+    N = N * 2
+    if (#input == result) and ( N < 100000 ) then
+        return max_events_test(N)
+    end
+
     local result = parser:execute(input)
 
-    input = input:sub(result)
+    input = input:sub(result + 1)
 
     -- We should have generated a stack overflow event that should be
     -- handled gracefully... note that
-    ok(field_cnt < header_cnt and field_cnt > 1000,
+    ok(#input > result,
        "Expect " .. header_cnt .. " field events, got " .. field_cnt)
 
     result = parser:execute(input)
