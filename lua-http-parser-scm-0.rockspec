@@ -3,7 +3,7 @@
 package = 'lua-http-parser'
 version = 'scm-0'
 source = {
-    url = 'git://github.com/brimworks/lua-http-parser.git'
+    url = 'gitrec+https://github.com/brimworks/lua-http-parser'
 }
 description = {
     summary  = "A Lua binding to Ryan Dahl's http request/response parser.",
@@ -12,7 +12,8 @@ description = {
     license  = 'MIT', --as with Ryan's
 }
 dependencies = {
-    'lua >= 5.1, < 5.4'
+    'lua >= 5.1, < 5.4',
+    'luarocks-fetch-gitrec',
 }
 build = {
     type = 'builtin',
