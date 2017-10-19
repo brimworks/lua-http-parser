@@ -566,14 +566,32 @@ static int lhp_reset(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     http_parser*  parser = &(lparser->parser);
 
-    /* truncate stack to (userdata) */
-    lua_settop(L, 1);
+    /* truncate stack to (userdata) and calbacks */
+    lua_settop(L, 2);
 
     /* re-initialize http-parser. */
     http_parser_init(parser, parser->type);
 
-    /* clear buffer */
+    /* truncate stack to (userdata) calbacks fenv */
     lua_getfenv(L, 1);
+
+    /* reset callbacks */
+    if(lua_istable(L, 2)){
+        int cb_id;
+        for (cb_id = 1; cb_id <= CB_LEN; cb_id++ ) {
+            lua_getfield(L, 2, lhp_callback_names[cb_id-1]);
+            if ( lua_isfunction(L, -1) ) {
+                FLAG_SET_CB(lparser->flags, cb_id);
+            } else {
+                FLAG_RM_CB(lparser->flags, cb_id);
+                lua_pop(L, 1); /* pop non-function value. */
+                lua_pushnil(L); /* set callback as nil */
+            }
+            lua_rawseti(L, -2, cb_id); /* fenv[cb_id] = callback */
+        }
+    }
+
+    /* clear buffer */
     lua_rawgeti(L, 2, FENV_BUFFER_IDX);
     lhp_table_clear(L, 3, 1, lparser->buf_len);
 

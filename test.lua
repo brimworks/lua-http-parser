@@ -125,6 +125,49 @@ function chunk_header_test()
     ok(content_length == 0x1A, "second chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
 end
 
+function reset_test()
+    local url
+
+    local parser = lhp.request{
+        on_url = function(u) url = u end;
+    }
+
+    parser:execute('GET /path1 HTTP/1.1')
+
+    parser:reset()
+
+    parser:execute(''
+      .. 'POST /path2 HTTP/1.1\r\n'
+      .. '\r\n'
+    )
+
+    ok(parser:method() == 'POST', "reset should reinit parser")
+    ok(url == '/path2',           "reset should clear buffer and do not touch callbacks")
+end
+
+function reset_callback_test()
+    local headers1, headers2, url = {}, {}
+
+    local parser = lhp.request{
+        on_header = function(h, v) headers1[h] = v end;
+        on_url = function(u) url = u end;
+    }
+
+    -- reset on_header and remove on_url
+    parser:reset{
+        on_header = function(h, v) headers2[h] = v end;
+    }
+
+    parser:execute(''
+      .. 'GET /path HTTP/1.1\r\n'
+      .. 'A: b\r\n'
+      .. '\r\n'
+    )
+
+    ok(url == nil, "reset should remove callback")
+    ok(headers1.A == nil and headers2.A == 'b', "reset should change callback")
+end
+
 -- NOTE: http-parser fails if the first response is HTTP 1.0:
 -- HTTP/1.0 100 Please continue mate.
 -- Which I think is a HTTP spec violation, but other HTTP clients, still work.
@@ -474,6 +517,8 @@ regression_no_body_cb_test()
 status_code_test()
 chunk_header_test()
 parse_url_test()
+reset_test()
+reset_callback_test()
 
 print("1.." .. counter-1)
 if failure > 0 then os.exit(-1) end
