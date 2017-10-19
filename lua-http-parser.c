@@ -81,6 +81,15 @@ static const char *lhp_callback_names[] = {
 #define FLAG_SET_HFIELD(flags)     ( (flags) |= FLAGS_CB_ID_FIRST_BIT )
 #define FLAG_RM_HFIELD(flags)      ( (flags) &= ~FLAGS_CB_ID_FIRST_BIT )
 
+void lhp_pushint64(lua_State *L, int64_t v){
+    // compilers usially remove constant condition on compile time
+    if(sizeof(lua_Integer) >= sizeof(int64_t)){
+        lua_pushinteger(L, (lua_Integer)v);
+        return;
+    }
+    lua_pushnumber(L, (lua_Number)v);
+}
+
 typedef struct lhttp_parser {
     http_parser parser;     /* embedded http_parser. */
     int         flags;      /* See above flag test/set/remove macros. */
@@ -241,7 +250,7 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
 
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
     if(cb_id == CB_ON_CHUNK_HEADER){
-      lua_pushinteger(L, lparser->parser.content_length);
+      lhp_pushint64(L, lparser->parser.content_length);
     }
     else{
       lua_pushnil(L);

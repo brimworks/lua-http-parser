@@ -123,6 +123,11 @@ function chunk_header_test()
     content_length = nil
     parser:execute("1A\r\n")
     ok(content_length == 0x1A, "second chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+    parser:execute("abcdefghigklmnopqrstuvwxyz\r\n")
+
+    content_length = nil
+    parser:execute("FFFFFFFFFF\r\n")
+    ok(content_length == 1099511627775, "Content-Length over than 32 bits: 1099511627775, got " .. (content_length and string.format("%g", content_length) or 'nil'))
 end
 
 function reset_test()
