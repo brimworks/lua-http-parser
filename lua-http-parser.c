@@ -81,7 +81,7 @@ static const char *lhp_callback_names[] = {
 #define FLAG_SET_HFIELD(flags)     ( (flags) |= FLAGS_CB_ID_FIRST_BIT )
 #define FLAG_RM_HFIELD(flags)      ( (flags) &= ~FLAGS_CB_ID_FIRST_BIT )
 
-void lhp_pushint64(lua_State *L, int64_t v){
+static void lhp_pushint64(lua_State *L, int64_t v){
     // compilers usially remove constant condition on compile time
     if(sizeof(lua_Integer) >= sizeof(int64_t)){
         lua_pushinteger(L, (lua_Integer)v);
