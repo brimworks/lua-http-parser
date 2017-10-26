@@ -58,16 +58,16 @@ API:
         on_header       = function(hkey, hval) ... end
         on_body         = function(body) ... end
 
-        on_message_begin    = function() ... end,
-        on_message_complete = function() ... end,
-        on_headers_complete = function() ... end,
+        on_message_begin    = function() ... end
+        on_message_complete = function() ... end
+        on_headers_complete = function() ... end
+
+        on_chunk_header   = function(content_length) ... end
+        on_chunk_complete = function() ... end
     }
 
     parser = lhp.response { -- same as request except `on_url`. Plus
-        on_staus          = function(code, text) ... end,
-
-        on_chunk_header   = function(content_length) ... end,
-        on_chunk_complete = function() ... end,
+        on_status         = function(code, text) ... end
     }
 
         Create a new HTTP parser to handle either an HTTP request or
@@ -131,7 +131,7 @@ API:
 
         Returns errno(number), error name(string), error description(string).
 
-    parser:reset()
+    parser:reset([callbacks])
 
         Re-initialize HTTP parser clearing any previous error/state.
 
