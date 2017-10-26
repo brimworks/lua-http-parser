@@ -249,7 +249,7 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
     if ( ! lua_checkstack(L, 5) ) return -1;
 
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
-    if(cb_id == CB_ON_CHUNK_HEADER){
+    if(CB_ON_CHUNK_HEADER == cb_id){
       lhp_pushint64(L, lparser->parser.content_length);
     }
     else{
