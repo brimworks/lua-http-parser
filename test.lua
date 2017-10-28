@@ -9,9 +9,11 @@ end
 
 local lhp = require 'http.parser'
 
-local counter = 1
+local counter, failure = 1, 0
 
 function ok(assert_true, desc)
+    if not assert_true then failure = failure + 1 end
+
     local msg = ( assert_true and "ok " or "not ok " ) .. counter
     if ( desc ) then
         msg = msg .. " - " .. desc
@@ -21,19 +23,8 @@ function ok(assert_true, desc)
 end
 
 local function parse_path_query_fragment(uri)
-    local path, query, fragment, off
-    -- parse path
-    path, off = uri:match('([^?]*)()')
-    -- parse query
-    if uri:sub(off, off) == '?' then
-        query, off = uri:match('([^#]*)()', off + 1)
-    end
-    -- parse fragment
-    if uri:sub(off, off) == '#' then
-        fragment = uri:sub(off + 1)
-        off = #uri
-    end
-    return path or '/', query, fragment
+    local url = lhp.parse_url(uri, true)
+    return url.path, url.query, url.fragment
 end
 
 local pipeline = [[
@@ -71,6 +62,116 @@ function pipeline_test()
     ok(#body == 0)
 end
 
+function parse_url_test()
+
+    local tast_cases = {
+        {"http://hello.com:8080/some/path?with=1%23&args=value", false,
+            {
+                schema='http',
+                host='hello.com',
+                port=8080,
+                path='/some/path',
+                query='with=1%23&args=value',
+            },
+        },
+        {"/foo/t.html?qstring#frag", true,
+            {
+                path='/foo/t.html',
+                query='qstring',
+                fragment='frag',
+            },
+        },
+    }
+
+    for _, tast_case in ipairs(tast_cases) do
+        local url, is_connect, expect = tast_case[1], tast_case[2], tast_case[3]
+        local result = lhp.parse_url(url, is_connect)
+        is_deeply(result, expect, 'Url: ' .. url)
+    end
+end
+
+function status_code_test()
+    local response = { "HTTP/1.1 404 Not found", "", ""}
+    local code, text
+    local parser = lhp.response{
+        on_status = function(a, b) code, text = a, b end
+    }
+    parser:execute(table.concat(response, '\r\n'))
+    ok(code == 404, 'Expected status code: 404, got ' .. tostring(code))
+    ok(text == 'Not found', 'Expected status text: `Not found`, got `' .. tostring(text) .. '`')
+end
+
+function chunk_header_test()
+    local response = {
+        "HTTP/1.1 200 OK";
+        "Transfer-Encoding: chunked";
+        "";
+        "";
+    }
+    local content_length
+    local parser = lhp.response{
+        on_chunk_header = function(a) content_length = a end
+    }
+
+    parser:execute(table.concat(response, '\r\n'))
+
+    content_length = nil
+    parser:execute("23\r\n")
+    ok(content_length == 0x23, "first chunk Content-Length expected: 0x23, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+    parser:execute("This is the data in the first chunk\r\n")
+
+    content_length = nil
+    parser:execute("1A\r\n")
+    ok(content_length == 0x1A, "second chunk Content-Length expected: 0x1A, got " .. (content_length and string.format("0x%2X", content_length) or 'nil'))
+    parser:execute("abcdefghigklmnopqrstuvwxyz\r\n")
+
+    content_length = nil
+    parser:execute("FFFFFFFFFF\r\n")
+    ok(content_length == 1099511627775, "Content-Length over than 32 bits: 1099511627775, got " .. (content_length and string.format("%g", content_length) or 'nil'))
+end
+
+function reset_test()
+    local url
+
+    local parser = lhp.request{
+        on_url = function(u) url = u end;
+    }
+
+    parser:execute('GET /path1 HTTP/1.1')
+
+    parser:reset()
+
+    parser:execute(''
+      .. 'POST /path2 HTTP/1.1\r\n'
+      .. '\r\n'
+    )
+
+    ok(parser:method() == 'POST', "reset should reinit parser")
+    ok(url == '/path2',           "reset should clear buffer and do not touch callbacks")
+end
+
+function reset_callback_test()
+    local headers1, headers2, url = {}, {}
+
+    local parser = lhp.request{
+        on_header = function(h, v) headers1[h] = v end;
+        on_url = function(u) url = u end;
+    }
+
+    -- reset on_header and remove on_url
+    parser:reset{
+        on_header = function(h, v) headers2[h] = v end;
+    }
+
+    parser:execute(''
+      .. 'GET /path HTTP/1.1\r\n'
+      .. 'A: b\r\n'
+      .. '\r\n'
+    )
+
+    ok(url == nil, "reset should remove callback")
+    ok(headers1.A == nil and headers2.A == 'b', "reset should change callback")
+end
 
 -- NOTE: http-parser fails if the first response is HTTP 1.0:
 -- HTTP/1.0 100 Please continue mate.
@@ -168,16 +269,19 @@ function nil_body_test()
     ok(#body == 2)
 end
 
-function max_events_test()
+function max_events_test(N)
+    N = N or 3000
+
     -- The goal of this test is to generate the most possible events
     local input_tbl = {
         "GET / HTTP/1.1\r\n",
     }
     -- Generate enough events to trigger a "stack overflow"
-    local header_cnt = 3000
+    local header_cnt = N
     for i=1, header_cnt do
         input_tbl[#input_tbl+1] = "a:\r\n"
     end
+    input_tbl[#input_tbl+1] = "\r\n"
 
     local cbs = {}
     local field_cnt = 0
@@ -187,20 +291,40 @@ function max_events_test()
 
     local parser = lhp.request(cbs)
     local input = table.concat(input_tbl)
-
     local result = parser:execute(input)
 
-    input = input:sub(result)
+    N = N * 2
+    if (#input == result) and ( N < 100000 ) then
+        return max_events_test(N)
+    end
+
+    input = input:sub(result + 1)
 
     -- We should have generated a stack overflow event that should be
     -- handled gracefully... note that
-    ok(field_cnt < header_cnt and field_cnt > 1000,
+    ok(#input < result,
        "Expect " .. header_cnt .. " field events, got " .. field_cnt)
 
     result = parser:execute(input)
 
     ok(0 == result, "Parser can not continue after stack overflow ["
        .. tostring(result) .. "]")
+end
+
+function regression_no_body_cb_test()
+    -- The goal of this test is to generate the most possible events
+    local input_tbl = {
+        "GET / HTTP/1.1\r\n",
+        "Header: value\r\n",
+        "\r\n",
+    }
+
+    local parser = lhp.request{}
+
+    local input = table.concat(input_tbl)
+
+    local result = parser:execute(input)
+    ok(result == #input, 'can work without on_body callback')
 end
 
 function basic_tests()
@@ -394,5 +518,12 @@ nil_body_test()
 pipeline_test()
 please_continue_test()
 connection_close_test()
+regression_no_body_cb_test()
+status_code_test()
+chunk_header_test()
+parse_url_test()
+reset_test()
+reset_callback_test()
 
-print("1.." .. counter)
+print("1.." .. counter-1)
+if failure > 0 then os.exit(-1) end

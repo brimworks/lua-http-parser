@@ -25,8 +25,8 @@
 * THE SOFTWARE.
 **********************************************************************
 
-To use this library, you need joyent's http-parser, get it here:
-    git clone git://github.com/joyent/http-parser.git
+To use this library, you need nodejs http-parser, get it here:
+    git clone git://github.com/nodejs/http-parser.git
 
 To build this library, you need luarocks, get it here:
     http://www.luarocks.org/en/Download
@@ -61,8 +61,14 @@ API:
         on_message_begin    = function() ... end
         on_message_complete = function() ... end
         on_headers_complete = function() ... end
+
+        on_chunk_header   = function(content_length) ... end
+        on_chunk_complete = function() ... end
     }
-    parser = lhp.response { ... }
+
+    parser = lhp.response { -- same as request except `on_url`. Plus
+        on_status         = function(code, text) ... end
+    }
 
         Create a new HTTP parser to handle either an HTTP request or
         HTTP response respectively.  Pass in a table of callbacks that
@@ -124,6 +130,10 @@ API:
     parser:error()
 
         Returns errno(number), error name(string), error description(string).
+
+    parser:reset([callbacks])
+
+        Re-initialize HTTP parser clearing any previous error/state.
 
     parser:status_code()
 

@@ -3,6 +3,11 @@
 #include <lua.h>
 #include "http-parser/http_parser.h"
 
+#if LUA_VERSION_NUM >= 502
+#define lua_setfenv         lua_setuservalue
+#define lua_getfenv         lua_getuservalue
+#endif
+
 #define PARSER_MT "http.parser{parser}"
 
 #define check_parser(L, narg)                                   \
@@ -19,20 +24,26 @@
  */
 #define CB_ON_MESSAGE_BEGIN      1
 #define CB_ON_URL                2
-#define CB_ON_HEADER             3
-#define CB_ON_HEADERS_COMPLETE   4
-#define CB_ON_BODY               5
-#define CB_ON_MESSAGE_COMPLETE   6
+#define CB_ON_STATUS             3
+#define CB_ON_HEADER             4
+#define CB_ON_HEADERS_COMPLETE   5
+#define CB_ON_BODY               6
+#define CB_ON_MESSAGE_COMPLETE   7
+#define CB_ON_CHUNK_HEADER       8
+#define CB_ON_CHUNK_COMPLETE     9
 #define CB_LEN                   (sizeof(lhp_callback_names)/sizeof(*lhp_callback_names))
 
 static const char *lhp_callback_names[] = {
     /* The MUST be in the same order as the above callbacks */
     "on_message_begin",
     "on_url",
+    "on_status",
     "on_header",
     "on_headers_complete",
     "on_body",
     "on_message_complete",
+    "on_chunk_header",
+    "on_chunk_complete",
 };
 
 /* Non-callback FENV indices. */
@@ -64,11 +75,20 @@ static const char *lhp_callback_names[] = {
 #define FLAG_HAS_BUF(flags, cb_id) ( FLAG_GET_BUF_CB_ID(flags) == cb_id )
 #define FLAG_SET_BUF(flags, cb_id) ( (flags) = (((flags) & ~FLAGS_BUF_CB_ID_MASK) \
   | ((cb_id) & FLAGS_BUF_CB_ID_MASK)) )
-#define FLAG_RM_BUF(flags, cb_id)  ( (flags) &= ~FLAGS_BUF_CB_ID_MASK )
+#define FLAG_RM_BUF(flags)  ( (flags) &= ~FLAGS_BUF_CB_ID_MASK )
 
 #define FLAG_HAS_HFIELD(flags)     ( ((flags) & FLAGS_CB_ID_FIRST_BIT) >> FLAGS_BUF_CB_ID_BITS )
 #define FLAG_SET_HFIELD(flags)     ( (flags) |= FLAGS_CB_ID_FIRST_BIT )
 #define FLAG_RM_HFIELD(flags)      ( (flags) &= ~FLAGS_CB_ID_FIRST_BIT )
+
+static void lhp_pushint64(lua_State *L, int64_t v){
+    // compilers usially remove constant condition on compile time
+    if(sizeof(lua_Integer) >= sizeof(int64_t)){
+        lua_pushinteger(L, (lua_Integer)v);
+        return;
+    }
+    lua_pushnumber(L, (lua_Number)v);
+}
 
 typedef struct lhttp_parser {
     http_parser parser;     /* embedded http_parser. */
@@ -98,6 +118,7 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
         lua_rawseti(L, idx, begin);
         return 0;
     }
+
     /* do a table concat. */
     luaL_buffinit(L, &buff);
     for(; begin <= len; begin++) {
@@ -108,6 +129,19 @@ static int lhp_table_concat_and_clear(lua_State *L, int idx, int begin, int len)
         lua_rawseti(L, idx, begin);
     }
     luaL_pushresult(&buff);
+    return 0;
+}
+
+/* Clear all elements in the table at idx starting at
+ * element begin and going to length len.
+ */
+static int lhp_table_clear(lua_State *L, int idx, int begin, int len) {
+    /* nil all elements. */
+    for(; begin <= len; begin++) {
+        /* remove element from table. */
+        lua_pushnil(L);
+        lua_rawseti(L, idx, begin);
+    }
     return 0;
 }
 
@@ -142,7 +176,7 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id) {
     begin = 1;
     top   = lua_gettop(L);
 
-    FLAG_RM_BUF(lparser->flags, cb_id);
+    FLAG_RM_BUF(lparser->flags);
     if ( CB_ON_HEADER == cb_id ) {
         if ( FLAG_HAS_HFIELD(lparser->flags) ) {
             /* Push <func>, <arg1>[, <arg2>] */
@@ -162,9 +196,11 @@ static int lhp_flush(lhttp_parser* lparser, int cb_id) {
             lparser->buf_len = 1;
         }
     } else {
-        /* Push <func>[, <arg1> */
+        /* Push <func>[, <arg1>] */
         lua_rawgeti(L, ST_FENV_IDX, cb_id);
-
+        if (CB_ON_STATUS == cb_id){
+            lua_pushinteger(L, lparser->parser.status_code);
+        }
         begin    = 1;
         save     = 0;
         lparser->buf_len = 0;
@@ -213,7 +249,12 @@ static int lhp_push_nil_event(lhttp_parser* lparser, int cb_id) {
     if ( ! lua_checkstack(L, 5) ) return -1;
 
     lua_rawgeti(L, ST_FENV_IDX, cb_id);
-    lua_pushnil(L);
+    if(CB_ON_CHUNK_HEADER == cb_id){
+      lhp_pushint64(L, lparser->parser.content_length);
+    }
+    else{
+      lua_pushnil(L);
+    }
 
     return 0;
 }
@@ -272,6 +313,10 @@ static int lhp_url_cb(http_parser* parser, const char* str, size_t len) {
     return lhp_http_data_cb(parser, CB_ON_URL, str, len, 0);
 }
 
+static int lhp_status_cb(http_parser* parser, const char* str, size_t len) {
+    return lhp_http_data_cb(parser, CB_ON_STATUS, str, len, 0);
+}
+
 static int lhp_header_field_cb(http_parser* parser, const char* str, size_t len) {
     return lhp_http_data_cb(parser, CB_ON_HEADER, str, len, 0);
 }
@@ -301,19 +346,32 @@ static int lhp_body_cb(http_parser* parser, const char* str, size_t len) {
 
 static int lhp_message_complete_cb(http_parser* parser) {
     /* Send on_body(nil) message to comply with LTN12 */
-    int result = lhp_push_nil_event((lhttp_parser*)parser, CB_ON_BODY);
-    if ( 0 != result ) return result;
+    lhttp_parser* lparser = (lhttp_parser*)parser;
+    if( FLAG_HAS_CB(lparser->flags, CB_ON_BODY) ) {
+      int result = lhp_push_nil_event((lhttp_parser*)parser, CB_ON_BODY);
+      if ( 0 != result ) return result;
+    }
 
     return lhp_http_cb(parser, CB_ON_MESSAGE_COMPLETE);
 }
 
+static int lhp_chunk_header_cb(http_parser* parser) {
+    return lhp_http_cb(parser, CB_ON_CHUNK_HEADER);
+}
+
+static int lhp_chunk_complete_cb(http_parser* parser) {
+    return lhp_http_cb(parser, CB_ON_CHUNK_COMPLETE);
+}
+
 static int lhp_init(lua_State* L, enum http_parser_type type) {
     int cb_id;
-    luaL_checktype(L, 1, LUA_TTABLE);
     /* Stack: callbacks */
 
-    lhttp_parser* lparser = (lhttp_parser*)lua_newuserdata(L, sizeof(lhttp_parser));
-    http_parser* parser = &(lparser->parser);
+    lhttp_parser* lparser;
+    http_parser* parser;
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lparser = (lhttp_parser*)lua_newuserdata(L, sizeof(lhttp_parser));
+    parser = &(lparser->parser);
     assert(NULL != parser);
     /* Stack: callbacks, userdata */
 
@@ -355,6 +413,7 @@ static int lhp_init(lua_State* L, enum http_parser_type type) {
 static int lhp_request(lua_State* L) {
     return lhp_init(L, HTTP_REQUEST);
 }
+
 static int lhp_response(lua_State* L) {
     return lhp_init(L, HTTP_RESPONSE);
 }
@@ -367,13 +426,16 @@ static int lhp_execute(lua_State* L) {
     const char*   str = luaL_checklstring(L, 2, &len);
 
     static const http_parser_settings settings = {
-        .on_message_begin    = lhp_message_begin_cb,
-        .on_url              = lhp_url_cb,
-        .on_header_field     = lhp_header_field_cb,
-        .on_header_value     = lhp_header_value_cb,
-        .on_headers_complete = lhp_headers_complete_cb,
-        .on_body             = lhp_body_cb,
-        .on_message_complete = lhp_message_complete_cb
+        lhp_message_begin_cb,
+        lhp_url_cb,
+        lhp_status_cb,
+        lhp_header_field_cb,
+        lhp_header_value_cb,
+        lhp_headers_complete_cb,
+        lhp_body_cb,
+        lhp_message_complete_cb,
+        lhp_chunk_header_cb,
+        lhp_chunk_complete_cb
     };
 
     /* truncate stack to (userdata, string) */
@@ -398,7 +460,7 @@ static int lhp_execute(lua_State* L) {
     parser->data = NULL;
 
     /* replace nil place-holder with 'result' code. */
-    lua_pushnumber(L, result);
+    lhp_pushint64(L, result);
     lua_replace(L, ST_LEN+1);
     /* Transform the stack into a table: */
     len = lua_gettop(L) - ST_LEN;
@@ -415,6 +477,12 @@ static int lhp_should_keep_alive(lua_State* L) {
 static int lhp_is_upgrade(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     lua_pushboolean(L, lparser->parser.upgrade);
+    return 1;
+}
+
+static int lhp__tostring(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    lua_pushfstring(L, PARSER_MT" %p", lparser);
     return 1;
 }
 
@@ -458,10 +526,85 @@ static int lhp_status_code(lua_State* L) {
 static int lhp_error(lua_State* L) {
     lhttp_parser* lparser = check_parser(L, 1);
     enum http_errno http_errno = lparser->parser.http_errno;
-    lua_pushnumber(L, http_errno);
+    lua_pushinteger(L, http_errno);
     lua_pushstring(L, http_errno_name(http_errno));
     lua_pushstring(L, http_errno_description(http_errno));
     return 3;
+}
+
+static int lhp_parse_url(lua_State* L){
+
+#define SET_UF_FIELD(id, name) \
+    if(url.field_set & (1 << id)){ \
+      lua_pushlstring(L, u + url.field_data[id].off, url.field_data[id].len); \
+      lua_setfield(L, -2, name); \
+    }
+
+    size_t len; const char *u = luaL_checklstring(L, 1, &len);
+    int is_connect = lua_toboolean(L, 2);
+    struct http_parser_url url;
+    int result = http_parser_parse_url(u, len, is_connect, &url);
+    if (result != 0) {
+      lua_pushnil(L);
+      lua_pushinteger(L, result);
+    }
+
+    lua_newtable(L);
+
+    if(url.field_set & (1 << UF_PORT)){
+      lua_pushinteger(L, url.port);
+      lua_setfield(L, -2, "port");
+    }
+
+    SET_UF_FIELD(UF_SCHEMA,   "schema"  );
+    SET_UF_FIELD(UF_HOST,     "host"    );
+    SET_UF_FIELD(UF_PATH,     "path"    );
+    SET_UF_FIELD(UF_QUERY,    "query"   );
+    SET_UF_FIELD(UF_FRAGMENT, "fragment");
+    SET_UF_FIELD(UF_USERINFO, "userinfo");
+
+    return 1;
+#undef SET_UF_FIELD
+}
+
+static int lhp_reset(lua_State* L) {
+    lhttp_parser* lparser = check_parser(L, 1);
+    http_parser*  parser = &(lparser->parser);
+
+    /* truncate stack to (userdata) and calbacks */
+    lua_settop(L, 2);
+
+    /* re-initialize http-parser. */
+    http_parser_init(parser, parser->type);
+
+    /* truncate stack to (userdata) calbacks fenv */
+    lua_getfenv(L, 1);
+
+    /* reset callbacks */
+    if(lua_istable(L, 2)){
+        int cb_id;
+        for (cb_id = 1; cb_id <= CB_LEN; cb_id++ ) {
+            lua_getfield(L, 2, lhp_callback_names[cb_id-1]);
+            if ( lua_isfunction(L, -1) ) {
+                FLAG_SET_CB(lparser->flags, cb_id);
+            } else {
+                FLAG_RM_CB(lparser->flags, cb_id);
+                lua_pop(L, 1); /* pop non-function value. */
+                lua_pushnil(L); /* set callback as nil */
+            }
+            lua_rawseti(L, -2, cb_id); /* fenv[cb_id] = callback */
+        }
+    }
+
+    /* clear buffer */
+    lua_rawgeti(L, 2, FENV_BUFFER_IDX);
+    lhp_table_clear(L, 3, 1, lparser->buf_len);
+
+    /* reset buffer length and flags. */
+    lparser->buf_len = 0;
+    FLAG_RM_BUF(lparser->flags);
+    FLAG_RM_HFIELD(lparser->flags);
+    return 0;
 }
 
 static int lhp_is_function(lua_State* L) {
@@ -473,7 +616,6 @@ static int lhp_is_function(lua_State* L) {
  * can yield without having to apply the CoCo patch to Lua. */
 static const char* lhp_execute_lua =
     "local c_execute, is_function = ...\n"
-    "local type = type\n"
     "local function execute(result, cb, arg1, arg2, ...)\n"
     "    if ( not cb ) then\n"
     "        return result\n"
@@ -515,6 +657,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_pushcfunction(L, lhp_is_upgrade);
     lua_setfield(L, -2, "is_upgrade");
 
+    lua_pushcfunction(L, lhp__tostring);
+    lua_setfield(L, -2, "__tostring");
+
     lua_pushcfunction(L, lhp_method);
     lua_setfield(L, -2, "method");
 
@@ -533,6 +678,9 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lhp_push_execute_fn(L);
     lua_setfield(L, -2, "execute");
 
+    lua_pushcfunction(L, lhp_reset);
+    lua_setfield(L, -2, "reset");
+
     lua_pop(L, 1);
 
     /* export http.parser */
@@ -544,5 +692,8 @@ LUALIB_API int luaopen_http_parser(lua_State* L) {
     lua_pushcfunction(L, lhp_response);
     lua_setfield(L, -2, "response");
 
+    lua_pushcfunction(L, lhp_parse_url);
+    lua_setfield(L, -2, "parse_url");
+    
     return 1;
 }
