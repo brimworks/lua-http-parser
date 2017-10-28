@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 
 package = 'lua-http-parser'
-version = 'v2.7-0'
+version = '2.7-0'
 source = {
     url = 'gitrec+https://github.com/brimworks/lua-http-parser'
 }
