@@ -57,7 +57,7 @@ before_build:
   # external deps
 
 build_script:
-  - luarocks make lua-http-parser-v2.7-1.rockspec
+  - luarocks make lua-http-parser-2.7-1.rockspec
 
 before_test:
   # test deps
