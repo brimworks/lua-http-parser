@@ -12,6 +12,8 @@ matrix:
       os: linux
     - env: LUA="lua 5.3"
       os: linux
+    - env: LUA="lua 5.4"
+      os: linux
     - env: LUA="luajit 2.0"
       os: linux
     - env: LUA="luajit 2.1"
@@ -29,7 +31,7 @@ before_install:
   - source here/bin/activate
 
 install:
-  - luarocks make lua-http-parser-scm-0.rockspec
+  - luarocks make lua-http-parser-v2.7-1.rockspec
 
 before_script:
   - luarocks show luacov-coveralls > /dev/null 2>&1 || luarocks install luacov-coveralls
