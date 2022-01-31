@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 
 package = 'lua-http-parser'
-version = 'v2.7-0'
+version = '2.7-1'
 source = {
     url = 'gitrec+https://github.com/brimworks/lua-http-parser'
 }
@@ -12,7 +12,7 @@ description = {
     license  = 'MIT', --as with Ryan's
 }
 dependencies = {
-    'lua >= 5.1, < 5.4',
+    'lua >= 5.1, < 5.5',
     'luarocks-fetch-gitrec',
 }
 build = {
